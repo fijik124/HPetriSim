@@ -314,6 +314,65 @@ void CHSimulation::Reset()
 	}
 }
 
+void CHSimulation::ScanPotentialConflicts()
+{
+	//scanning for potentially conflicts
+	for (INT_PTR loop=0; loop<m_Transitions.GetCount(); loop++)
+	{
+		bool conflict = false;
+
+		CHTransition* pTran = m_Transitions[loop];
+
+		Connectors& ins =  pTran->ConnectorsIn();
+
+		for (INT_PTR loop2=0; loop2<ins.GetCount(); loop2++)
+		{
+			CHConnector* pCon = ins[loop2];
+
+			if (!pCon->Connected())
+			{
+				continue;
+			}
+
+			if (pCon->From()->ConnectorsOut().GetCount() > 1)
+			{
+				pTran->Enabled(true);
+				pTran->Invalid(true);
+				conflict = true;
+				break;
+			}
+		}
+
+		if(!conflict)
+		{
+			Connectors& outs =  pTran->ConnectorsOut();
+
+			for (INT_PTR loop2=0; loop2<outs.GetCount(); loop2++)
+			{
+				CHConnector* pCon = outs[loop2];
+
+				if (!pCon->Connected())
+				{
+					continue;
+				}
+
+				if (pCon->To()->ConnectorsIn().GetCount() > 1)
+				{
+					pTran->Enabled(true);
+					pTran->Invalid(true);
+					conflict = true;
+					break;
+				}
+			}
+		}
+
+		if (conflict)
+		{
+			m_ConflictedTransitions.Add(pTran);
+		}
+	}
+}
+
 void CHSimulation::Online()
 {
 	ASSERT_VALID(m_pDoc);
@@ -385,61 +444,7 @@ void CHSimulation::Online()
 		}
 	}
 
-	//scanning for potentially conflicts
-	for (INT_PTR loop=0; loop<m_Transitions.GetCount(); loop++)
-	{
-		bool conflict = false;
-
-		CHTransition* pTran = m_Transitions[loop];
-
-		Connectors& ins =  pTran->ConnectorsIn();
-
-		for (INT_PTR loop2=0; loop2<ins.GetCount(); loop2++)
-		{
-			CHConnector* pCon = ins[loop2];
-
-			if (!pCon->Connected())
-			{
-				continue;
-			}
-
-			if (pCon->From()->ConnectorsOut().GetCount() > 1)
-			{
-				pTran->Enabled(true);
-				pTran->Invalid(true);
-				conflict = true;
-				break;
-			}
-		}
-
-		if(!conflict)
-		{
-			Connectors& outs =  pTran->ConnectorsOut();
-
-			for (INT_PTR loop2=0; loop2<outs.GetCount(); loop2++)
-			{
-				CHConnector* pCon = outs[loop2];
-
-				if (!pCon->Connected())
-				{
-					continue;
-				}
-
-				if (pCon->To()->ConnectorsIn().GetCount() > 1)
-				{
-					pTran->Enabled(true);
-					pTran->Invalid(true);
-					conflict = true;
-					break;
-				}
-			}
-		}
-
-		if (conflict)
-		{
-			m_ConflictedTransitions.Add(pTran);
-		}
-	}
+	ScanPotentialConflicts();
 
 	for (INT_PTR loop=0; loop<m_Transitions.GetCount(); loop++)
 	{

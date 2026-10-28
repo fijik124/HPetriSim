@@ -67,6 +67,8 @@ private:
 	friend class CHSimulationCharacterization;
 	void SendMessage(UpdateMode mode);
 	bool SingleStep(bool fast, bool& lock);
+	// Appends to the list prepared by Online(); preserves legacy flag updates.
+	void ScanPotentialConflicts();
 	void AnimateTokens();
 
 	bool m_Online;

@@ -6,6 +6,7 @@
 #include "domain/TokenEffects.h"
 #include "domain/Timing.h"
 #include "domain/ConflictSelection.h"
+#include "domain/ConflictScan.h"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <memory>
@@ -218,6 +219,26 @@ public:
 				actual.push_back(TransitionId{document.Sim().m_Transitions[index]->Id()});
 		CHECK(actual == std::get<ConflictSelectionPlan>(prediction).selectedInNetOrder);
 		return locked;
+	}
+	std::vector<hps::domain::TransitionId> ScanLegacy()
+	{
+		document.Sim().m_ConflictedTransitions.RemoveAll();
+		document.Sim().ScanPotentialConflicts();
+		std::vector<hps::domain::TransitionId> result;
+		for (INT_PTR index = 0; index < document.Sim().m_ConflictedTransitions.GetCount(); ++index)
+			result.push_back(hps::domain::TransitionId{document.Sim().m_ConflictedTransitions[index]->Id()});
+		return result;
+	}
+	void CheckPreScan(const std::vector<hps::domain::TransitionId>& expected)
+	{
+		using namespace hps::domain;
+		const auto exported = hps::adapters::ExportLegacySimulationSnapshot(document);
+		REQUIRE(std::holds_alternative<hps::adapters::LegacySimulationSnapshot>(exported));
+		const auto& before = std::get<hps::adapters::LegacySimulationSnapshot>(exported);
+		const auto predicted = FindLegacyPotentialConflicts(before.snapshot, before.topology);
+		REQUIRE(std::holds_alternative<std::vector<TransitionId>>(predicted));
+		CHECK(std::get<std::vector<TransitionId>>(predicted) == expected);
+		CHECK(ScanLegacy() == expected);
 	}
 	void Conflict(CHTransition& transition) { document.Sim().m_ConflictedTransitions.Add(&transition); }
 	void Limits(long time, long steps)
@@ -1227,5 +1248,115 @@ TEST_CASE("Pure selection replays separate branch and meet choices in order", "[
 		CHECK(meetSecond.Activ());
 		CHECK(input.GetToken() == 1);
 		CHECK(output.GetToken() == 1);
+	}
+}
+
+TEST_CASE("Potential conflict scan ignores arc kind eligibility and resource abundance", "[scan-differential]")
+{
+	using hps::domain::TransitionId;
+	for (bool branch : {true, false})
+		for (auto firstKind : {CHConnector::TypeNormal, CHConnector::TypeTest, CHConnector::TypeInhibitor})
+			for (auto secondKind : {CHConnector::TypeNormal, CHConnector::TypeTest, CHConnector::TypeInhibitor})
+				for (long tokens : {0L, 2L, 10L})
+				{
+					INFO("branch=" << branch << ", kinds=" << firstKind << "," << secondKind << ", tokens=" << tokens);
+					CHSimulationCharacterization net;
+					auto& place = net.Place(tokens, 10);
+					auto& first = net.Transition(CHTransition::TTM_DELAY, 5);
+					auto& second = net.Transition();
+					if (branch) { net.Arc(place, first, 1, firstKind); net.Arc(place, second, 1, secondKind); }
+					else { net.Arc(first, place, 1, firstKind); net.Arc(second, place, 1, secondKind); }
+					for (auto* transition : {&first, &second})
+					{
+						transition->Enabled(false);
+						transition->Invalid(false);
+						transition->Activ(true);
+					}
+					net.CheckPreScan({TransitionId{first.Id()}, TransitionId{second.Id()}});
+					for (auto* transition : {&first, &second})
+					{
+						CHECK(transition->Enabled());
+						CHECK(transition->Invalid());
+						CHECK(transition->Activ()); // Scan itself does not reset active.
+					}
+					CHECK(first.GetDelay() == 5);
+					CHECK(place.GetToken() == tokens);
+					CHECK(net.Steps() == 0);
+				}
+}
+
+TEST_CASE("Potential scan lists a transition once in document order across branch and meet", "[scan-differential]")
+{
+	using hps::domain::TransitionId;
+	CHSimulationCharacterization net;
+	auto& input = net.Place(2);
+	auto& output = net.Place(0);
+	auto& isolated = net.Transition();
+	auto& first = net.Transition();
+	auto& second = net.Transition();
+	auto& third = net.Transition();
+	net.Arc(input, first);
+	net.Arc(input, second);
+	net.Arc(first, output);
+	net.Arc(third, output);
+	isolated.Enabled(false);
+	isolated.Invalid(false);
+	net.CheckPreScan({TransitionId{first.Id()}, TransitionId{second.Id()}, TransitionId{third.Id()}});
+	CHECK_FALSE(isolated.Enabled());
+	CHECK_FALSE(isolated.Invalid());
+	// The caller clears the destination list before each scan, as Online does.
+	net.CheckPreScan({TransitionId{first.Id()}, TransitionId{second.Id()}, TransitionId{third.Id()}});
+}
+
+TEST_CASE("Legacy scan skips disconnected arcs but counts them as place adjacency peers", "[scan-differential]")
+{
+	using namespace hps::domain;
+	CHSimulationCharacterization net;
+	auto& input = net.Place(2);
+	auto& first = net.Transition();
+	auto& second = net.Transition();
+	net.Arc(input, first);
+	auto& partial = net.Arc(input, second);
+	SECTION("Only source remains") { partial.To(nullptr); }
+	SECTION("Only destination remains") { partial.From(nullptr); }
+	const auto exported = hps::adapters::ExportLegacySimulationSnapshot(net.document);
+	REQUIRE(std::holds_alternative<std::vector<ValidationIssue>>(exported));
+	CHECK(std::get<std::vector<ValidationIssue>>(exported).front().code == ValidationCode::DisconnectedArc);
+	const auto actual = net.ScanLegacy(); // No unsafe SingleStep on malformed input.
+	if (partial.From()) CHECK(actual == std::vector<TransitionId>{TransitionId{first.Id()}});
+	else CHECK(actual.empty());
+}
+
+TEST_CASE("Actual pre-scan feeds pure selection after reconnection and with parallel arcs", "[scan-differential]")
+{
+	using hps::domain::TransitionId;
+	SECTION("Reconnection")
+	{
+		for (bool branch : {true, false})
+		{
+			CHSimulationCharacterization net;
+			auto& place = net.Place(branch ? 2 : 0);
+			auto& first = net.Transition();
+			auto& second = net.Transition();
+			auto& arc = branch ? net.Arc(place, first) : net.Arc(first, place);
+			if (branch) { net.Arc(place, second); arc.From(nullptr); arc.From(&place); }
+			else { net.Arc(second, place); arc.To(nullptr); arc.To(&place); }
+			net.CheckPreScan({TransitionId{first.Id()}, TransitionId{second.Id()}});
+			net.Seed(1);
+			CHECK_FALSE(net.CheckSelection({0}));
+			CHECK_FALSE(first.Activ());
+			CHECK(second.Activ());
+		}
+	}
+	SECTION("Parallel arcs")
+	{
+		CHSimulationCharacterization net;
+		auto& place = net.Place(2);
+		auto& transition = net.Transition();
+		net.Arc(place, transition);
+		net.Arc(place, transition);
+		net.CheckPreScan({TransitionId{transition.Id()}});
+		net.Seed(1);
+		CHECK(net.CheckSelection({0}));
 	}
 }

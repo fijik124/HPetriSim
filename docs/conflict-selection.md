@@ -96,11 +96,11 @@ ctest --test-dir build/vs2022-win32 -C Release -R '^(domain\.(conflict-selection
 
 ## Next step and rollback
 
-Extract and verify the potential-conflict pre-scan without starting the unsafe
-legacy worker, preserving transition/endpoint order and mixed/parallel-arc
-behavior. Then compose eligibility, selection, token effects and timing into a
-single synchronous step with explicit random inputs. Keep production activation,
-random generator replacement, reset and background shutdown as separate work.
+The subsequent [pre-scan extraction](conflict-scan.md) verifies the structural
+conflict list against the actual legacy loop without starting its worker.
+Next, compose scan, eligibility, selection, token effects and timing into a single
+synchronous step with explicit random inputs. Keep production activation, random
+generator replacement, reset and background shutdown as separate work.
 
 Rollback removes `ConflictSelection.*`, its domain source entry, the new
 validation code, `ConflictSelectionTests.cpp` and the two CTest registrations.

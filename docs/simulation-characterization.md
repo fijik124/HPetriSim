@@ -123,7 +123,9 @@ each step using the selection supplied by the legacy kernel. The subsequent
 reasons using explicit stochastic samples. The subsequent
 [selection extraction](conflict-selection.md) predicts conflict winners from
 explicit ordered conflict lists and known random choices before the legacy step.
-Production pre-scan and background lifetime still need extraction and verification.
+The subsequent [pre-scan extraction](conflict-scan.md) compares structural conflict
+lists with the actual scan loop through a private method extracted from `Online()`.
+Full online initialization and background lifetime still need verification.
 
 The subsequent [conflict characterization](conflict-characterization.md) adds
 eight separately tagged cases, including three new defect cases. It demonstrates
