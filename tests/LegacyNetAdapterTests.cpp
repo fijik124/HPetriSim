@@ -10,6 +10,8 @@
 
 using namespace hps::domain;
 using hps::adapters::ExportLegacyNet;
+using hps::adapters::ExportLegacySimulationSnapshot;
+using hps::adapters::LegacySimulationSnapshot;
 
 namespace
 {
@@ -54,6 +56,63 @@ bool HasError(CPetriSimDoc& document, ValidationCode code)
     return std::any_of(issues.begin(), issues.end(), [&](const auto& issue) {
         return issue.code == code && !issue.message.empty();
     });
+}
+
+struct RestoreAdjacency
+{
+    Connectors& target;
+    std::vector<CHConnector*> saved;
+    explicit RestoreAdjacency(Connectors& connectors) : target(connectors)
+    {
+        for (INT_PTR i = 0; i < target.GetCount(); ++i) saved.push_back(target[i]);
+    }
+    ~RestoreAdjacency()
+    {
+        target.RemoveAll();
+        for (auto* arc : saved) target.Add(arc);
+    }
+};
+
+bool HasTopologyError(CPetriSimDoc& document, ValidationCode code)
+{
+    const auto result = ExportLegacySimulationSnapshot(document);
+    REQUIRE(std::holds_alternative<std::vector<ValidationIssue>>(result));
+    const auto& issues = std::get<std::vector<ValidationIssue>>(result);
+    return std::any_of(issues.begin(), issues.end(), [&](const auto& issue) {
+        return issue.code == code && !issue.message.empty();
+    });
+}
+
+void CheckActualAdjacency(CPetriSimDoc& document)
+{
+    const auto result = ExportLegacySimulationSnapshot(document);
+    std::string diagnostics;
+    if (const auto* issues = std::get_if<std::vector<ValidationIssue>>(&result))
+        for (const auto& issue : *issues) diagnostics += std::to_string(issue.objectId) + ": " + issue.message + "\n";
+    INFO(diagnostics);
+    REQUIRE(std::holds_alternative<LegacySimulationSnapshot>(result));
+    const auto& projected = std::get<LegacySimulationSnapshot>(result);
+    CHECK(ValidateConflictTopology(projected.snapshot, projected.topology).empty());
+    std::size_t nodeCount = 0;
+    auto& objects = document.DrawObjectList();
+    for (POSITION position = objects.GetHeadPosition(); position;)
+    {
+        auto* object = objects.GetNext(position);
+        auto* member = dynamic_cast<CHNetMember*>(object);
+        if (!member) continue;
+        ++nodeCount;
+        NodeId node = dynamic_cast<CHPosition*>(member)
+            ? NodeId{PlaceId{member->Id()}} : NodeId{TransitionId{member->Id()}};
+        const auto& adjacency = projected.topology.at(node);
+        auto check = [](Connectors& actual, const std::vector<ArcId>& copied) {
+            REQUIRE(copied.size() == static_cast<std::size_t>(actual.GetCount()));
+            for (INT_PTR index = 0; index < actual.GetCount(); ++index)
+                CHECK(copied[static_cast<std::size_t>(index)].value == actual[index]->Id());
+        };
+        check(member->ConnectorsIn(), adjacency.incoming);
+        check(member->ConnectorsOut(), adjacency.outgoing);
+    }
+    CHECK(projected.topology.size() == nodeCount);
 }
 }
 
@@ -261,5 +320,123 @@ TEST_CASE("Sample archives can be inspected through the domain adapter", "[adapt
         CHECK(net.transitions.size() == transitions);
         CHECK(net.arcs.size() == arcs);
         CHECK_FALSE(net.places.empty());
+        CheckActualAdjacency(document);
     }
+}
+
+TEST_CASE("Topology export preserves reconnection order independently of document order", "[adapter-topology]")
+{
+    for (bool branch : {true, false})
+    {
+        LegacyGraph graph;
+        auto& place = graph.Add<CHPosition>();
+        auto& first = graph.Add<CHTransition>();
+        auto& second = graph.Add<CHTransition>();
+        auto& firstArc = branch ? graph.Arc(place, first) : graph.Arc(first, place);
+        auto& secondArc = branch ? graph.Arc(place, second) : graph.Arc(second, place);
+        if (branch) { firstArc.From(nullptr); firstArc.From(&place); }
+        else { firstArc.To(nullptr); firstArc.To(&place); }
+        const auto result = ExportLegacySimulationSnapshot(graph.document);
+        REQUIRE(std::holds_alternative<LegacySimulationSnapshot>(result));
+        const auto& copy = std::get<LegacySimulationSnapshot>(result);
+        const auto& adjacency = copy.topology.at(PlaceId{place.Id()});
+        const auto& ordered = branch ? adjacency.outgoing : adjacency.incoming;
+        CHECK(ordered == std::vector<ArcId>{ArcId{secondArc.Id()}, ArcId{firstArc.Id()}});
+        CHECK(copy.snapshot.net.arcs.front().id.value == firstArc.Id());
+        CheckActualAdjacency(graph.document);
+        // Reconnect again, then change data: the returned value retains both copies.
+        if (branch) { secondArc.From(nullptr); secondArc.From(&place); }
+        else { secondArc.To(nullptr); secondArc.To(&place); }
+        firstArc.Weigth(7);
+        CHECK(ordered.front().value == secondArc.Id());
+        CHECK(copy.snapshot.net.arcs.front().weight == 1);
+    }
+}
+
+TEST_CASE("Topology export includes isolated nodes and distinct mixed parallel arcs", "[adapter-topology]")
+{
+    LegacyGraph graph;
+    auto& place = graph.Add<CHPosition>();
+    auto& transition = graph.Add<CHTransition>();
+    auto& isolatedPlace = graph.Add<CHPosition>();
+    auto& isolatedTransition = graph.Add<CHTransition>();
+    graph.Arc(place, transition);
+    graph.Arc(place, transition).Type(CHConnector::TypeTest);
+    graph.Arc(transition, place).Type(CHConnector::TypeInhibitor);
+    CheckActualAdjacency(graph.document);
+    const auto result = ExportLegacySimulationSnapshot(graph.document);
+    REQUIRE(std::holds_alternative<LegacySimulationSnapshot>(result));
+    const auto& topology = std::get<LegacySimulationSnapshot>(result).topology;
+    CHECK(topology.at(PlaceId{isolatedPlace.Id()}).incoming.empty());
+    CHECK(topology.at(PlaceId{isolatedPlace.Id()}).outgoing.empty());
+    CHECK(topology.at(TransitionId{isolatedTransition.Id()}).incoming.empty());
+    CHECK(topology.at(TransitionId{isolatedTransition.Id()}).outgoing.empty());
+}
+
+TEST_CASE("Topology export diagnoses corrupted registered adjacency", "[adapter-topology]")
+{
+    LegacyGraph graph;
+    auto& place = graph.Add<CHPosition>();
+    auto& transition = graph.Add<CHTransition>();
+    auto& arc = graph.Arc(place, transition);
+    RestoreAdjacency restore(place.ConnectorsOut());
+    RestoreAdjacency restoreIncoming(place.ConnectorsIn());
+    SECTION("Missing")
+    {
+        place.ConnectorsOut().RemoveAll();
+        CHECK(HasTopologyError(graph.document, ValidationCode::MissingArcReference));
+    }
+    SECTION("Duplicate")
+    {
+        place.ConnectorsOut().Add(&arc);
+        CHECK(HasTopologyError(graph.document, ValidationCode::DuplicateArcReference));
+    }
+    SECTION("Wrong direction")
+    {
+        place.ConnectorsIn().Add(&arc);
+        CHECK(HasTopologyError(graph.document, ValidationCode::InvalidArcReference));
+    }
+    SECTION("Wrong node")
+    {
+        RestoreAdjacency restoreOther(transition.ConnectorsOut());
+        transition.ConnectorsOut().Add(&arc);
+        CHECK(HasTopologyError(graph.document, ValidationCode::InvalidArcReference));
+    }
+}
+
+TEST_CASE("Topology export rejects null and unregistered adjacency pointers", "[adapter-topology]")
+{
+    LegacyGraph graph;
+    auto& place = graph.Add<CHPosition>();
+    CHConnector foreign(CPoint(0, 0), 99);
+    RestoreAdjacency restore(place.ConnectorsOut());
+    SECTION("Null") { place.ConnectorsOut().Add(nullptr); }
+    SECTION("Unregistered") { place.ConnectorsOut().Add(&foreign); }
+    CHECK(HasTopologyError(graph.document, ValidationCode::StaleReference));
+}
+
+TEST_CASE("Topology export forwards net validation failures", "[adapter-topology]")
+{
+    LegacyGraph graph;
+    auto& place = graph.Add<CHPosition>();
+    auto& transition = graph.Add<CHTransition>();
+    auto& arc = graph.Arc(place, transition);
+    SECTION("Disconnected") { arc.To(nullptr); CHECK(HasTopologyError(graph.document, ValidationCode::DisconnectedArc)); }
+    SECTION("Stale endpoint ID") { arc.FromId(99); CHECK(HasTopologyError(graph.document, ValidationCode::StaleReference)); }
+    SECTION("Duplicate ID") { transition.Id(place.Id()); CHECK(HasTopologyError(graph.document, ValidationCode::DuplicateId)); }
+}
+
+TEST_CASE("Empty and drawing-only documents export empty topology", "[adapter-topology]")
+{
+    LegacyGraph graph;
+    SECTION("Empty") {}
+    SECTION("Drawing only")
+    {
+        auto rectangle = std::make_unique<CHRect>(CPoint(0, 0));
+        graph.document.DrawObjectList().AddTail(rectangle.get());
+        graph.objects.push_back(std::move(rectangle));
+    }
+    const auto result = ExportLegacySimulationSnapshot(graph.document);
+    REQUIRE(std::holds_alternative<LegacySimulationSnapshot>(result));
+    CHECK(std::get<LegacySimulationSnapshot>(result).topology.empty());
 }

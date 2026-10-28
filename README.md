@@ -135,8 +135,13 @@ step. Random generation and conflict selection remain outside this API. See
 
 Eight additional legacy conflict cases cover adjacency order, mixed arc kinds,
 parallel arcs and conflict continuation. Reconnection proves that document arc
-order alone cannot replay selection; topology projection is the next boundary.
+order alone cannot replay selection.
 See [conflict characterization and extraction requirements](docs/conflict-characterization.md).
+
+`ExportLegacySimulationSnapshot` now copies and validates actual endpoint order
+alongside the net snapshot. Nine pure topology cases, six adapter cases and
+extended checks on all six sample archives cover this boundary. The production
+selector is unchanged. See [topology contract and verification](docs/conflict-topology.md).
 
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all

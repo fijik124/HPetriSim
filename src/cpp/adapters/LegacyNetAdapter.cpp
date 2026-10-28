@@ -23,6 +23,56 @@ std::uint64_t LegacyUnsigned(long value)
 }
 }
 
+SimulationExportResult ExportLegacySimulationSnapshot(CPetriSimDoc& document)
+{
+    using namespace domain;
+    auto exported = ExportLegacyNet(document);
+    if (auto* issues = std::get_if<std::vector<ValidationIssue>>(&exported)) return *issues;
+    LegacySimulationSnapshot result{std::get<NetSnapshot>(std::move(exported)), {}};
+    std::unordered_map<CHConnector*, ArcId> registeredArcs;
+    auto& objects = document.DrawObjectList();
+    for (POSITION position = objects.GetHeadPosition(); position;)
+        if (auto* arc = dynamic_cast<CHConnector*>(objects.GetNext(position)))
+            registeredArcs.emplace(arc, ArcId{arc->Id()});
+    std::vector<ValidationIssue> issues;
+    for (POSITION position = objects.GetHeadPosition(); position;)
+    {
+        auto* object = objects.GetNext(position);
+        CHNetMember* member = nullptr;
+        NodeId node;
+        if (auto* place = dynamic_cast<CHPosition*>(object))
+        {
+            member = place;
+            node = PlaceId{place->Id()};
+        }
+        else if (auto* transition = dynamic_cast<CHTransition*>(object))
+        {
+            member = transition;
+            node = TransitionId{transition->Id()};
+        }
+        if (!member) continue;
+        NodeAdjacency adjacency;
+        auto copy = [&](Connectors& connectors, std::vector<ArcId>& destination) {
+            for (INT_PTR index = 0; index < connectors.GetCount(); ++index)
+            {
+                auto* arc = connectors[index];
+                // Check pointer membership before accessing the referenced object.
+                const auto found = registeredArcs.find(arc);
+                if (found == registeredArcs.end())
+                    issues.push_back({ValidationCode::StaleReference, member->Id(), "Adjacency contains a null or unregistered connector"});
+                else destination.push_back(found->second);
+            }
+        };
+        copy(member->ConnectorsIn(), adjacency.incoming);
+        copy(member->ConnectorsOut(), adjacency.outgoing);
+        result.topology.emplace(node, std::move(adjacency));
+    }
+    auto validation = ValidateConflictTopology(result.snapshot, result.topology);
+    issues.insert(issues.end(), validation.begin(), validation.end());
+    if (!issues.empty()) return issues;
+    return result;
+}
+
 ExportResult ExportLegacyNet(CPetriSimDoc& document)
 {
     using namespace domain;

@@ -116,3 +116,7 @@ evaluator over validated snapshots and compares it with the real legacy step.
 It is not enabled in the application. Background execution,
 snapshot publication, persistence migration, command history and UI replacement
 are outside this stage.
+
+The subsequent [conflict topology projection](conflict-topology.md) supplements
+snapshots with validated per-node connector order for future conflict replay.
+It preserves the existing net export API and leaves production selection unchanged.

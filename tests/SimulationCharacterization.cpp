@@ -210,7 +210,7 @@ public:
 	void Reset() { document.Sim().Reset(); }
 	void SampleTime(long time) { document.Sim().SampleTime(time); }
 	void Seed(unsigned int seed) { std::srand(seed); }
-	hps::adapters::ExportResult ExportWithOnlineFlag()
+	template<class Exporter> auto ExportWithOnlineFlag(Exporter exporter)
 	{
 		// Exercise the adapter's guard without starting an unsafe legacy worker.
 		struct RestoreFlag
@@ -220,7 +220,7 @@ public:
 			~RestoreFlag() { flag = saved; }
 		} restore{document.Sim().m_Online, document.Sim().m_Online};
 		document.Sim().m_Online = true;
-		return hps::adapters::ExportLegacyNet(document);
+		return exporter(document);
 	}
 
 	CPetriSimDoc document;
@@ -236,12 +236,17 @@ private:
 TEST_CASE("Domain export rejects online state without starting a worker", "[adapter]")
 {
 	CHSimulationCharacterization net;
-	const auto result = net.ExportWithOnlineFlag();
+	const auto result = net.ExportWithOnlineFlag(hps::adapters::ExportLegacyNet);
 	using Issues = std::vector<hps::domain::ValidationIssue>;
 	REQUIRE(std::holds_alternative<Issues>(result));
 	const auto& issues = std::get<Issues>(result);
 	REQUIRE(issues.size() == 1);
 	CHECK(issues[0].code == hps::domain::ValidationCode::SnapshotUnavailable);
+	CHECK_FALSE(net.document.SimOnline());
+	const auto topology = net.ExportWithOnlineFlag(hps::adapters::ExportLegacySimulationSnapshot);
+	REQUIRE(std::holds_alternative<Issues>(topology));
+	REQUIRE(std::get<Issues>(topology).size() == 1);
+	CHECK(std::get<Issues>(topology)[0].code == hps::domain::ValidationCode::SnapshotUnavailable);
 	CHECK_FALSE(net.document.SimOnline());
 }
 

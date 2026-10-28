@@ -82,7 +82,9 @@ enum class ValidationCode
     NonBipartiteArc, MissingState, UnexpectedState,
     InvalidObject, DisconnectedArc, ForeignEndpoint, StaleReference, SnapshotUnavailable,
     UnsupportedLegacyRange, InvalidSelection, TokenUnderflow, ArithmeticOverflow,
-    InvalidSimulationSettings, InvalidDelaySample
+    InvalidSimulationSettings, InvalidDelaySample,
+    MissingAdjacency, UnexpectedAdjacency, InvalidArcReference,
+    DuplicateArcReference, MissingArcReference
 };
 struct ValidationIssue
 {

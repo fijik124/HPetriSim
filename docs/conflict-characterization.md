@@ -100,12 +100,10 @@ ctest --test-dir build/vs2022-win32 -C Release -R '^simulation.conflicts$' --out
 
 ## Next smallest implementation step
 
-Add an explicit, typed conflict-topology projection alongside the snapshot,
-without activating it in the UI. Preserve incoming/outgoing ArcId order for
-every node and validate exact membership, uniqueness, direction and endpoint
-agreement. Reject missing/stale references explicitly. Characterize projection
-after reconnection and on the sample documents. Do not change archive layout or
-pretend document arc order is sufficient.
+The subsequent [topology projection](conflict-topology.md) adds typed endpoint
+order alongside the snapshot and validates membership, uniqueness, direction and
+endpoint agreement. It checks reconnection and sample documents without changing
+the archive layout or activating the adapter in the UI.
 
 Then extract an ordered selector with explicit random choices and diagnostic
 traces. Decide separately how to expose the known raw-index and parallel-arc

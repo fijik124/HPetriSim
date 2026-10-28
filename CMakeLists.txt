@@ -90,6 +90,8 @@ if(BUILD_TESTING)
     set_tests_properties(simulation.characterization PROPERTIES
         TIMEOUT 30 RUN_SERIAL TRUE LABELS "simulation;characterization")
     add_test(NAME domain.legacy-adapter COMMAND hps_simulation_tests "[adapter]")
+    add_test(NAME domain.topology-adapter COMMAND hps_simulation_tests "[adapter-topology]")
+    set_tests_properties(domain.topology-adapter PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
     add_test(NAME domain.rules-differential COMMAND hps_simulation_tests "[rules-differential]")
     add_test(NAME domain.effects-differential COMMAND hps_simulation_tests "[effects-differential]")
     add_test(NAME domain.timing-differential COMMAND hps_simulation_tests "[timing-differential]")
