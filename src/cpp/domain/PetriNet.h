@@ -84,7 +84,7 @@ enum class ValidationCode
     UnsupportedLegacyRange, InvalidSelection, TokenUnderflow, ArithmeticOverflow,
     InvalidSimulationSettings, InvalidDelaySample,
     MissingAdjacency, UnexpectedAdjacency, InvalidArcReference,
-    DuplicateArcReference, MissingArcReference
+    DuplicateArcReference, MissingArcReference, InvalidConflictChoice
 };
 struct ValidationIssue
 {

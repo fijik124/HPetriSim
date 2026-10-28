@@ -88,11 +88,12 @@ ctest --test-dir build/vs2022-win32 -C Release -R '^domain\.(topology|topology-a
 
 ## Next step and rollback
 
-Extract the ordered conflict selector over this validated projection, with
-explicit random choices and diagnostic traces. Keep known raw-index and
-parallel-arc behavior visible as compatibility policy. The production pre-scan,
-selection, complete step composition and worker lifetime remain separate work;
-this stage neither chooses transitions nor replaces unsafe shutdown.
+The subsequent [selection extraction](conflict-selection.md) uses this projection
+with explicit conflict order, random choices and diagnostic traces. Known
+raw-index and parallel-arc behavior remains explicit compatibility policy.
+The production pre-scan, complete step composition and worker lifetime remain
+separate work; this topology stage itself does not choose transitions or replace
+unsafe shutdown.
 
 Rollback removes `ConflictTopology.*`, its domain CMake entry/validation codes,
 the combined export declarations/implementation, topology test files/CTest

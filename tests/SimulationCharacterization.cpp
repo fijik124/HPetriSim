@@ -5,6 +5,7 @@
 #include "domain/SimulationRules.h"
 #include "domain/TokenEffects.h"
 #include "domain/Timing.h"
+#include "domain/ConflictSelection.h"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <memory>
@@ -196,6 +197,26 @@ public:
 			CHECK(predicted.active == actual.Activ());
 			CHECK(predicted.enabled == actual.Enabled());
 		}
+		return locked;
+	}
+	bool CheckSelection(const std::vector<std::int64_t>& choices, bool fast = true)
+	{
+		using namespace hps::domain;
+		const auto exported = hps::adapters::ExportLegacySimulationSnapshot(document);
+		REQUIRE(std::holds_alternative<hps::adapters::LegacySimulationSnapshot>(exported));
+		const auto& before = std::get<hps::adapters::LegacySimulationSnapshot>(exported);
+		std::vector<TransitionId> order;
+		for (INT_PTR index = 0; index < document.Sim().m_ConflictedTransitions.GetCount(); ++index)
+			order.push_back(TransitionId{document.Sim().m_ConflictedTransitions[index]->Id()});
+		// Predict before executing the kernel; no winners are copied as inputs.
+		const auto prediction = PlanLegacyConflictSelection(before.snapshot, before.topology, order, choices);
+		REQUIRE(std::holds_alternative<ConflictSelectionPlan>(prediction));
+		const bool locked = Step(fast);
+		std::vector<TransitionId> actual;
+		for (INT_PTR index = 0; index < document.Sim().m_Transitions.GetCount(); ++index)
+			if (document.Sim().m_Transitions[index]->Activ())
+				actual.push_back(TransitionId{document.Sim().m_Transitions[index]->Id()});
+		CHECK(actual == std::get<ConflictSelectionPlan>(prediction).selectedInNetOrder);
 		return locked;
 	}
 	void Conflict(CHTransition& transition) { document.Sim().m_ConflictedTransitions.Add(&transition); }
@@ -978,7 +999,7 @@ TEST_CASE("Conflict winners follow seeded draws and connector order", "[conflict
 			net.Conflict(first);
 			net.Conflict(second);
 			net.Seed(seeds[sample]);
-			CHECK_FALSE(net.Step());
+			CHECK_FALSE(net.CheckSelection({winners[sample]}));
 			const bool firstWins = (winners[sample] == 0) != reverse;
 			CHECK(first.Activ() == firstWins);
 			CHECK(second.Activ() == !firstWins);
@@ -997,7 +1018,7 @@ TEST_CASE("Meet conflicts select one producer even with spare capacity", "[confl
 	net.Conflict(first);
 	net.Conflict(second);
 	net.Seed(1);
-	CHECK_FALSE(net.Step());
+	CHECK_FALSE(net.CheckSelection({0}));
 	CHECK(first.Activ());
 	CHECK_FALSE(second.Activ());
 	CHECK(output.GetToken() == 1);
@@ -1019,7 +1040,7 @@ TEST_CASE("Branch selection indexes all arcs including read-only arcs", "[confli
 		net.Conflict(first);
 		net.Conflict(second);
 		net.Seed(1); // Two active normal arcs counted, raw index zero retained.
-		CHECK_FALSE(net.Step());
+		CHECK_FALSE(net.CheckSelection({0}));
 		CHECK(read.Activ());
 		CHECK_FALSE(first.Activ());
 		CHECK_FALSE(second.Activ());
@@ -1044,7 +1065,7 @@ TEST_CASE("Meet selection indexes all arcs including read-only arcs", "[conflict
 		net.Conflict(first);
 		net.Conflict(second);
 		net.Seed(1);
-		CHECK_FALSE(net.Step());
+		CHECK_FALSE(net.CheckSelection({0}));
 		CHECK(read.Activ());
 		CHECK_FALSE(first.Activ());
 		CHECK_FALSE(second.Activ());
@@ -1064,7 +1085,7 @@ TEST_CASE("Parallel normal arcs can disable their own sole transition", "[confli
 		net.Arc(input, transition);
 		net.Conflict(transition);
 		net.Seed(seed);
-		CHECK(net.Step());
+		CHECK(net.CheckSelection({seed == 1 ? 0 : 1}));
 		CHECK_FALSE(transition.Activ());
 		CHECK(input.GetToken() == 2);
 		CHECK(net.Logged(L"Deadlock"));
@@ -1088,7 +1109,7 @@ TEST_CASE("A branch loser still processes its remaining input conflicts", "[conf
 	// Only register current: isolates continuation within its one outer iteration.
 	net.Conflict(current);
 	net.Seed(1); // Raw indices zero then one.
-	CHECK_FALSE(net.Step());
+	CHECK_FALSE(net.CheckSelection({0, 1}));
 	CHECK_FALSE(current.Activ());
 	CHECK(leftPeer.Activ());
 	CHECK_FALSE(rightFirst.Activ());
@@ -1113,7 +1134,7 @@ TEST_CASE("A branch loser still processes its output meet conflicts", "[conflict
 	net.Arc(current, output);
 	net.Conflict(current);
 	net.Seed(1);
-	CHECK_FALSE(net.Step());
+	CHECK_FALSE(net.CheckSelection({0, 1}));
 	CHECK_FALSE(current.Activ());
 	CHECK(branchPeer.Activ());
 	CHECK_FALSE(meetFirst.Activ());
@@ -1148,9 +1169,63 @@ TEST_CASE("Reconnecting an arc changes conflict order without changing document 
 		net.Conflict(first);
 		net.Conflict(second);
 		net.Seed(1);
-		CHECK_FALSE(net.Step());
+		CHECK_FALSE(net.CheckSelection({0}));
 		CHECK_FALSE(first.Activ());
 		CHECK(second.Activ());
 		CHECK(place.GetToken() == 1);
+	}
+}
+
+TEST_CASE("Pure selection matches chained legacy conflicts as a winner becomes blocked", "[selection-differential]")
+{
+	CHSimulationCharacterization net;
+	auto& input = net.Place(3);
+	auto& output = net.Place(0, 2);
+	auto& first = net.Transition();
+	auto& second = net.Transition();
+	auto& third = net.Transition();
+	net.Arc(input, first);
+	net.Arc(input, second);
+	net.Arc(input, third);
+	net.Arc(first, output);
+	net.Conflict(first);
+	net.Conflict(second);
+	net.Conflict(third);
+	for (int step = 0; step < 3; ++step)
+	{
+		net.Seed(1);
+		CHECK(net.CheckSelection({0}) == (step == 2));
+	}
+	CHECK(input.GetToken() == 1);
+	CHECK(output.GetToken() == 2);
+	CHECK_FALSE(first.Activ());
+	CHECK_FALSE(second.Activ());
+	CHECK_FALSE(third.Activ());
+}
+
+TEST_CASE("Pure selection replays separate branch and meet choices in order", "[selection-differential]")
+{
+	for (bool fast : {false, true})
+	{
+		CHSimulationCharacterization net;
+		auto& input = net.Place(2);
+		auto& output = net.Place(0, 10);
+		auto& branchFirst = net.Transition();
+		auto& branchSecond = net.Transition();
+		auto& meetFirst = net.Transition();
+		auto& meetSecond = net.Transition();
+		net.Arc(input, branchFirst);
+		net.Arc(input, branchSecond);
+		net.Arc(meetFirst, output);
+		net.Arc(meetSecond, output);
+		for (auto* transition : {&branchFirst, &branchSecond, &meetFirst, &meetSecond}) net.Conflict(*transition);
+		net.Seed(1);
+		CHECK_FALSE(net.CheckSelection({0, 1}, fast));
+		CHECK(branchFirst.Activ());
+		CHECK_FALSE(branchSecond.Activ());
+		CHECK_FALSE(meetFirst.Activ());
+		CHECK(meetSecond.Activ());
+		CHECK(input.GetToken() == 1);
+		CHECK(output.GetToken() == 1);
 	}
 }

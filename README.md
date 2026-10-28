@@ -143,6 +143,12 @@ alongside the net snapshot. Nine pure topology cases, six adapter cases and
 extended checks on all six sample archives cover this boundary. The production
 selector is unchanged. See [topology contract and verification](docs/conflict-topology.md).
 
+`PlanLegacyConflictSelection` now predicts winners and decision traces from that
+topology, an explicit conflict order and explicit random choices. Thirteen pure
+cases, two new differential cases and the eight extended conflict cases verify
+the legacy policy, including known defects. It is not activated in the UI. See
+[selection contract and remaining boundaries](docs/conflict-selection.md).
+
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all
 six sample files remain unchanged. Save/load round trips, editing, font preview,

@@ -120,8 +120,10 @@ independent of MFC drawing state and notification delivery. The subsequent
 [token-effect extraction](token-effects.md) compares marking and statistics after
 each step using the selection supplied by the legacy kernel. The subsequent
 [timing extraction](timing.md) compares delays, logical time, step counts and stop
-reasons using explicit stochastic samples. Conflict policy and background lifetime
-still need extraction and verification.
+reasons using explicit stochastic samples. The subsequent
+[selection extraction](conflict-selection.md) predicts conflict winners from
+explicit ordered conflict lists and known random choices before the legacy step.
+Production pre-scan and background lifetime still need extraction and verification.
 
 The subsequent [conflict characterization](conflict-characterization.md) adds
 eight separately tagged cases, including three new defect cases. It demonstrates
