@@ -99,11 +99,11 @@ ctest --test-dir build/vs2022-win32 -C Release -R '^simulation\.controller' --ou
 
 ## Next boundary and rollback
 
-Add an owning background service using cooperative cancellation and RAII lifetime,
-with serialized controller commands, synchronized value snapshots and explicit
-error delivery. Test pause/stop/document-close races and joining without blocking
-on UI messages before replacing the unsafe production worker. Keep UI activation
-and persistence migration separate.
+The subsequent [background service](background-simulation.md) adds a single owning
+worker, cooperative cancellation, serialized commands, immutable synchronized
+snapshots and joined closure without UI messages. MFC document-close/notification
+integration remains unverified. Keep production activation and persistence
+migration separate.
 
 Rollback removes `RunController.*`, its library source entry, controller test file,
 the two CTest registrations and two fixture cases. Existing synchronous engine,

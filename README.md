@@ -178,6 +178,11 @@ cases cover seeded continuation and retention of the last successful state.
 It starts no worker and is not activated in the UI. See
 [run state and cooperative request contract](docs/run-controller.md).
 
+`BackgroundSimulation` now owns a cooperative `std::jthread`, serialized command
+futures and immutable synchronized snapshots. Fourteen portable cases cover
+publication, pause/stop/reset, concurrent callers and joined shutdown. It is not
+connected to MFC documents yet. See [background ownership and closure](docs/background-simulation.md).
+
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all
 six sample files remain unchanged. Save/load round trips, editing, font preview,
