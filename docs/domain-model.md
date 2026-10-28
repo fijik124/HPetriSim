@@ -111,7 +111,8 @@ token getter and the adapter-only guard test in the characterization fixture.
 The original application still works independently; no document migration or
 reverse conversion is needed. Existing uncommitted work is retained.
 
-The next small step is a pure rule evaluator over a validated snapshot, compared
-against legacy behavior before any production switch. Background execution,
+The subsequent [eligibility extraction](simulation-rules.md) adds a pure rule
+evaluator over validated snapshots and compares it with the real legacy step.
+It is not enabled in the application. Background execution,
 snapshot publication, persistence migration, command history and UI replacement
 are outside this stage.

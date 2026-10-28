@@ -116,6 +116,12 @@ For a domain-only build, configure with `-DHPETRISIM_BUILD_MFC_APP=OFF`. Adding
 `-DBUILD_TESTING=OFF` builds just the library without downloading Catch2. This path
 does not require MFC and does not build the Windows UI or adapter.
 
+The pure `EvaluateLegacyEligibility` evaluator now covers pre-conflict arc and
+delay conditions. Fifteen rule cases and seven differential cases compare it with
+the real legacy step, including 201 parameter combinations and a two-step chain.
+Candidates are distinguished from actual conflict winners. See
+[rule semantics, limits and verification](docs/simulation-rules.md).
+
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all
 six sample files remain unchanged. Save/load round trips, editing, font preview,

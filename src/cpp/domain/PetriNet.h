@@ -80,7 +80,8 @@ enum class ValidationCode
     InvalidId, DuplicateId, InvalidCapacity, CapacityExceeded,
     InvalidWeight, InvalidTiming, InvalidEnum, MissingEndpoint,
     NonBipartiteArc, MissingState, UnexpectedState,
-    InvalidObject, DisconnectedArc, ForeignEndpoint, StaleReference, SnapshotUnavailable
+    InvalidObject, DisconnectedArc, ForeignEndpoint, StaleReference, SnapshotUnavailable,
+    UnsupportedLegacyRange
 };
 struct ValidationIssue
 {

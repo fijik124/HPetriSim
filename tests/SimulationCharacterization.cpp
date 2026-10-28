@@ -2,9 +2,11 @@
 #include "PetriSimDoc.h"
 #include "resource.h"
 #include "adapters/LegacyNetAdapter.h"
+#include "domain/SimulationRules.h"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -108,12 +110,43 @@ public:
 		object->To(&to);
 		CHConnector& result = *object;
 		arcs.push_back(std::move(object));
+		document.DrawObjectList().AddTail(&result);
 		return result;
 	}
 	bool Step(bool fast = true)
 	{
+		using namespace hps::domain;
+		const auto exported = hps::adapters::ExportLegacyNet(document);
+		REQUIRE(std::holds_alternative<NetSnapshot>(exported));
+		const auto evaluated = EvaluateLegacyEligibility(std::get<NetSnapshot>(exported));
+		REQUIRE(std::holds_alternative<std::vector<TransitionEligibility>>(evaluated));
+		const auto& expected = std::get<std::vector<TransitionEligibility>>(evaluated);
 		bool locked = false;
 		REQUIRE(document.Sim().SingleStep(fast, locked));
+		REQUIRE(expected.size() == static_cast<std::size_t>(document.Sim().m_Transitions.GetCount()));
+		for (std::size_t index = 0; index < expected.size(); ++index)
+		{
+			auto& actual = *document.Sim().m_Transitions[static_cast<INT_PTR>(index)];
+			REQUIRE(expected[index].id.value == actual.Id());
+			const auto& state = expected[index].state;
+			if (std::holds_alternative<ArcBlocked>(state))
+			{
+				CHECK_FALSE(actual.Activ());
+				CHECK_FALSE(actual.Enabled());
+			}
+			else if (std::holds_alternative<DelayPending>(state))
+			{
+				CHECK_FALSE(actual.Activ());
+				CHECK(actual.Enabled());
+			}
+			else
+			{
+				CHECK_FALSE(actual.Enabled());
+				// The pure evaluator stops before conflict selection. Candidates
+				// can be rejected by the real legacy conflict pass afterwards.
+				if (document.Sim().m_ConflictedTransitions.IsEmpty()) CHECK(actual.Activ());
+			}
+		}
 		return locked;
 	}
 	void Conflict(CHTransition& transition) { document.Sim().m_ConflictedTransitions.Add(&transition); }
@@ -577,4 +610,143 @@ TEST_CASE("Branch conflict chooses only one transition even with enough input to
 	CHECK(input.GetToken() == 1);
 	CHECK(first.GetTokensCount() == 1);
 	CHECK(second.GetTokensCount() == 0);
+}
+
+TEST_CASE("Pure input predicates match legacy over thresholds and delays", "[rules-differential]")
+{
+	for (auto kind : {CHConnector::TypeNormal, CHConnector::TypeTest, CHConnector::TypeInhibitor})
+		for (long tokens = 0; tokens <= 4; ++tokens)
+			for (long weight = 1; weight <= 3; ++weight)
+				for (long delay : {0L, 2L})
+				{
+					INFO("input: " << kind << ", tokens=" << tokens << ", weight=" << weight << ", delay=" << delay);
+					CHSimulationCharacterization net;
+					auto& input = net.Place(tokens);
+					auto& output = net.Place(0);
+					auto& transition = net.Transition(CHTransition::TTM_DELAY, delay);
+					net.Arc(input, transition, weight, kind);
+					net.Arc(transition, output);
+					net.Step(); // Step compares the pure decision with real legacy flags.
+				}
+}
+
+TEST_CASE("Pure output predicates match legacy over capacities and delays", "[rules-differential]")
+{
+	for (auto kind : {CHConnector::TypeNormal, CHConnector::TypeTest, CHConnector::TypeInhibitor})
+		for (long tokens = 0; tokens <= 4; ++tokens)
+			for (long weight = 1; weight <= 3; ++weight)
+				for (long delay : {0L, 2L})
+				{
+					INFO("output: " << kind << ", tokens=" << tokens << ", weight=" << weight << ", delay=" << delay);
+					CHSimulationCharacterization net;
+					auto& input = net.Place(1);
+					auto& output = net.Place(tokens, 4);
+					auto& transition = net.Transition(CHTransition::TTM_DELAY, delay);
+					net.Arc(input, transition);
+					net.Arc(transition, output, weight, kind);
+					net.Step();
+				}
+}
+
+TEST_CASE("Mixed arc conditions match the legacy conjunction", "[rules-differential]")
+{
+	CHSimulationCharacterization net;
+	auto& input = net.Place(3);
+	auto& testInput = net.Place(2);
+	auto& inhibitor = net.Place(1);
+	auto& output = net.Place(0, 3);
+	auto& testOutput = net.Place(2, 4);
+	auto& full = net.Place(1, 1);
+	auto& transition = net.Transition();
+	net.Arc(input, transition, 2);
+	net.Arc(testInput, transition, 2, CHConnector::TypeTest);
+	net.Arc(inhibitor, transition, 2, CHConnector::TypeInhibitor);
+	net.Arc(transition, output, 2);
+	net.Arc(transition, testOutput, 2, CHConnector::TypeTest);
+	net.Arc(transition, full, 1, CHConnector::TypeInhibitor);
+	SECTION("All conditions pass") { CHECK_FALSE(net.Step()); }
+	SECTION("One test input blocks") { testInput.SetToken(1); CHECK(net.Step()); }
+	SECTION("One output blocks") { testOutput.SetToken(3); CHECK(net.Step()); }
+}
+
+TEST_CASE("Eligibility is distinct from conflict selection", "[rules-differential]")
+{
+	using namespace hps::domain;
+	CHSimulationCharacterization net;
+	auto& input = net.Place(1);
+	auto& firstOutput = net.Place(0);
+	auto& secondOutput = net.Place(0);
+	auto& first = net.Transition();
+	auto& second = net.Transition();
+	net.Arc(input, first);
+	net.Arc(input, second);
+	net.Arc(first, firstOutput);
+	net.Arc(second, secondOutput);
+	net.Conflict(first);
+	net.Conflict(second);
+	const auto exported = hps::adapters::ExportLegacyNet(net.document);
+	REQUIRE(std::holds_alternative<NetSnapshot>(exported));
+	const auto result = EvaluateLegacyEligibility(std::get<NetSnapshot>(exported));
+	REQUIRE(std::holds_alternative<std::vector<TransitionEligibility>>(result));
+	const auto& candidates = std::get<std::vector<TransitionEligibility>>(result);
+	REQUIRE(candidates.size() == 2);
+	CHECK(std::holds_alternative<FireCandidate>(candidates[0].state));
+	CHECK(std::holds_alternative<FireCandidate>(candidates[1].state));
+	net.Seed(1);
+	CHECK_FALSE(net.Step());
+	CHECK(firstOutput.GetToken() + secondOutput.GetToken() == 1);
+}
+
+TEST_CASE("Legacy signed maximum marking matches the pure decision", "[rules-differential]")
+{
+	CHSimulationCharacterization net;
+	const auto maximum = (std::numeric_limits<long>::max)();
+	auto& input = net.Place(maximum, maximum);
+	auto& output = net.Place(0);
+	auto& transition = net.Transition();
+	net.Arc(input, transition);
+	net.Arc(transition, output);
+	CHECK_FALSE(net.Step());
+	CHECK(input.GetToken() == maximum - 1);
+	CHECK(output.GetToken() == 1);
+}
+
+TEST_CASE("Every legacy timing mode uses the current delay for eligibility", "[rules-differential]")
+{
+	for (auto mode : {CHTransition::TTM_IMMIDIATE, CHTransition::TTM_DELAY, CHTransition::TTM_EXPONENTIAL, CHTransition::TTM_EQUAL_DISTR})
+		for (long delay : {-1L, 0L, 1L, 2L})
+		{
+			INFO("time mode=" << mode << ", delay=" << delay);
+			CHSimulationCharacterization net;
+			auto& input = net.Place(1);
+			auto& output = net.Place(0);
+			auto& transition = net.Transition(mode, 2, 7);
+			transition.SetDelay(static_cast<UINT>(delay));
+			net.Arc(input, transition);
+			net.Arc(transition, output);
+			net.Step();
+		}
+}
+
+TEST_CASE("Chained transitions observe the previous marking until the next step", "[rules-differential]")
+{
+	CHSimulationCharacterization net;
+	auto& input = net.Place(1);
+	auto& intermediate = net.Place(0);
+	auto& output = net.Place(0);
+	auto& first = net.Transition();
+	auto& second = net.Transition();
+	net.Arc(input, first);
+	net.Arc(first, intermediate);
+	net.Arc(intermediate, second);
+	net.Arc(second, output);
+	REQUIRE_FALSE(net.Step());
+	CHECK(first.Activ());
+	CHECK_FALSE(second.Activ());
+	CHECK(intermediate.GetToken() == 1);
+	CHECK(output.GetToken() == 0);
+	REQUIRE_FALSE(net.Step());
+	CHECK_FALSE(first.Activ());
+	CHECK(second.Activ());
+	CHECK(output.GetToken() == 1);
 }

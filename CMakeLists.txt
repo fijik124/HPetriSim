@@ -87,6 +87,8 @@ if(BUILD_TESTING)
     set_tests_properties(simulation.characterization PROPERTIES
         TIMEOUT 30 RUN_SERIAL TRUE LABELS "simulation;characterization")
     add_test(NAME domain.legacy-adapter COMMAND hps_simulation_tests "[adapter]")
+    add_test(NAME domain.rules-differential COMMAND hps_simulation_tests "[rules-differential]")
+    set_tests_properties(domain.rules-differential PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
     set_tests_properties(domain.legacy-adapter PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
     set_tests_properties(domain.legacy-adapter PROPERTIES
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")

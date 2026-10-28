@@ -114,5 +114,7 @@ including `resource.h`; no production API change was needed for those errors.
 - Multi-document RNG interference and input validation/overflow.
 - Save/load of a running or paused state and historical unversioned fixtures.
 
-The next extraction should preserve these synchronous observations while making
-the step result independent of MFC drawing state and notification delivery.
+The subsequent [eligibility extraction](simulation-rules.md) compares pure
+pre-conflict decisions with each legacy step in this fixture. Its results remain
+independent of MFC drawing state and notification delivery; later firing phases
+still need extraction and verification.
