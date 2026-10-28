@@ -127,6 +127,10 @@ The subsequent [pre-scan extraction](conflict-scan.md) compares structural confl
 lists with the actual scan loop through a private method extracted from `Online()`.
 Full online initialization and background lifetime still need verification.
 
+The subsequent [complete-step composition](simulation-step.md) predicts every
+model field and clock/stop result before the legacy step. Its repeated-step tests
+carry the pure result forward independently of subsequent legacy exports.
+
 The subsequent [conflict characterization](conflict-characterization.md) adds
 eight separately tagged cases, including three new defect cases. It demonstrates
 the need to project actual adjacency order before extracting selection. The

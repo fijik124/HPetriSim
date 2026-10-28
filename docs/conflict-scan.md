@@ -101,11 +101,11 @@ ctest --test-dir build/vs2022-win32 -C Release -R '^domain\.(conflict-scan|scan-
 
 ## Next smallest step and rollback
 
-Compose pre-scan, eligibility/selection, token effects and timing into one pure
-synchronous step with explicit conflict choices and delay samples. Return a
-complete independent result only after every phase succeeds. Compare repeated
-steps against the real legacy kernel before considering UI activation, a new
-random generator, reset or safe background shutdown.
+The subsequent [complete-step composition](simulation-step.md) combines scan,
+selection, token effects and timing with explicit random inputs, returning a
+complete independent state only after all phases succeed. Repeated-step
+comparisons use the real kernel. Engine state ownership, UI activation, a new
+random generator, reset and safe background shutdown remain separate work.
 
 Rollback removes `ConflictScan.*`, its domain source entry, `ConflictScanTests.cpp`,
 the two CTest registrations, and scan helpers/four cases in the fixture. Inline

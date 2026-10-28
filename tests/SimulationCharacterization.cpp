@@ -7,6 +7,7 @@
 #include "domain/Timing.h"
 #include "domain/ConflictSelection.h"
 #include "domain/ConflictScan.h"
+#include "domain/SimulationStep.h"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <memory>
@@ -239,6 +240,90 @@ public:
 		REQUIRE(std::holds_alternative<std::vector<TransitionId>>(predicted));
 		CHECK(std::get<std::vector<TransitionId>>(predicted) == expected);
 		CHECK(ScanLegacy() == expected);
+	}
+	hps::domain::StepClock Clock()
+	{
+		return {document.Sim().m_SimTime, document.Sim().m_StepCount,
+			document.Sim().m_SampleTime, document.Sim().m_TimeLimit, document.Sim().m_StepLimit};
+	}
+	hps::adapters::LegacySimulationSnapshot BeginStepComparison()
+	{
+		ScanLegacy();
+		// Match Online's post-scan preparation once, without creating its worker.
+		for (INT_PTR index = 0; index < document.Sim().m_Transitions.GetCount(); ++index)
+		{
+			document.Sim().m_Transitions[index]->Activ(false);
+			document.Sim().m_Transitions[index]->Enabled(false);
+		}
+		const auto exported = hps::adapters::ExportLegacySimulationSnapshot(document);
+		REQUIRE(std::holds_alternative<hps::adapters::LegacySimulationSnapshot>(exported));
+		return std::get<hps::adapters::LegacySimulationSnapshot>(exported);
+	}
+	hps::domain::SimulationStepPlan CheckFullStep(const hps::domain::NetSnapshot& before,
+		const hps::domain::ConflictTopology& topology, const hps::domain::StepClock& clock,
+		const hps::domain::StepRandomInputs& random = {}, bool fast = true)
+	{
+		using namespace hps::domain;
+		const auto predicted = PlanLegacySimulationStep(before, topology, clock, random);
+		REQUIRE(std::holds_alternative<SimulationStepPlan>(predicted));
+		const auto& plan = std::get<SimulationStepPlan>(predicted);
+		const bool locked = Step(fast);
+		const auto exported = hps::adapters::ExportLegacyNet(document);
+		REQUIRE(std::holds_alternative<NetSnapshot>(exported));
+		const auto& actual = std::get<NetSnapshot>(exported);
+		const auto& expected = plan.snapshotAfter;
+		REQUIRE(actual.marking.size() == expected.marking.size());
+		for (const auto& [id, value] : expected.marking)
+		{
+			CHECK(value.tokens == actual.marking.at(id).tokens);
+			CHECK(value.producedTokens == actual.marking.at(id).producedTokens);
+		}
+		REQUIRE(actual.transitionStates.size() == expected.transitionStates.size());
+		for (const auto& [id, value] : expected.transitionStates)
+		{
+			const auto& state = actual.transitionStates.at(id);
+			CHECK(value.remainingDelayMs == state.remainingDelayMs);
+			CHECK(value.consumedTokens == state.consumedTokens);
+			CHECK(value.active == state.active);
+			CHECK(value.enabled == state.enabled);
+		}
+		REQUIRE(actual.net.places.size() == expected.net.places.size());
+		REQUIRE(actual.net.transitions.size() == expected.net.transitions.size());
+		REQUIRE(actual.net.arcs.size() == expected.net.arcs.size());
+		for (std::size_t index = 0; index < actual.net.places.size(); ++index)
+		{
+			const auto& a = actual.net.places[index]; const auto& e = expected.net.places[index];
+			CHECK(a.id == e.id); CHECK(a.name == e.name);
+			CHECK(a.capacity == e.capacity); CHECK(a.initialTokens == e.initialTokens);
+		}
+		for (std::size_t index = 0; index < actual.net.transitions.size(); ++index)
+		{
+			const auto& a = actual.net.transitions[index]; const auto& e = expected.net.transitions[index];
+			CHECK(a.id == e.id); CHECK(a.name == e.name); CHECK(a.mode == e.mode);
+			CHECK(a.initialDelayMs == e.initialDelayMs); CHECK(a.rangeMaxDelayMs == e.rangeMaxDelayMs);
+		}
+		for (std::size_t index = 0; index < actual.net.arcs.size(); ++index)
+		{
+			const auto& a = actual.net.arcs[index]; const auto& e = expected.net.arcs[index];
+			CHECK(a.id == e.id); CHECK(a.name == e.name); CHECK(a.from == e.from);
+			CHECK(a.to == e.to); CHECK(a.kind == e.kind); CHECK(a.weight == e.weight);
+		}
+		const auto actualClock = Clock();
+		CHECK(plan.clockAfter.timeMs == actualClock.timeMs);
+		CHECK(plan.clockAfter.steps == actualClock.steps);
+		CHECK(plan.clockAfter.sampleTimeMs == actualClock.sampleTimeMs);
+		CHECK(plan.clockAfter.timeLimitMs == actualClock.timeLimitMs);
+		CHECK(plan.clockAfter.stepLimit == actualClock.stepLimit);
+		CHECK(plan.stop.Locked() == locked);
+		CHECK(plan.stop.deadlock == Logged(L"Deadlock"));
+		CHECK(plan.stop.timeLimitReached == (actualClock.timeMs > actualClock.timeLimitMs));
+		CHECK(plan.stop.stepLimitReached == (actualClock.steps > actualClock.stepLimit));
+		std::vector<TransitionId> actualOrder;
+		for (INT_PTR index = 0; index < document.Sim().m_ConflictedTransitions.GetCount(); ++index)
+			actualOrder.push_back(TransitionId{document.Sim().m_ConflictedTransitions[index]->Id()});
+		CHECK(plan.potentialConflicts == actualOrder);
+		CHECK(ValidateConflictTopology(expected, topology).empty());
+		return plan;
 	}
 	void Conflict(CHTransition& transition) { document.Sim().m_ConflictedTransitions.Add(&transition); }
 	void Limits(long time, long steps)
@@ -1359,4 +1444,113 @@ TEST_CASE("Actual pre-scan feeds pure selection after reconnection and with para
 		net.Seed(1);
 		CHECK(net.CheckSelection({0}));
 	}
+}
+
+TEST_CASE("Complete pure steps replay a weighted chain through deadlock", "[step-differential]")
+{
+	for (bool fast : {false, true})
+	{
+		CHSimulationCharacterization net;
+		auto& input = net.Place(4);
+		auto& middle = net.Place(0);
+		auto& output = net.Place(0);
+		auto& first = net.Transition();
+		auto& second = net.Transition();
+		net.Arc(input, first, 2); net.Arc(first, middle);
+		net.Arc(middle, second); net.Arc(second, output, 3);
+		auto state = net.BeginStepComparison();
+		auto clock = net.Clock();
+		for (int index = 0; index < 4; ++index)
+		{
+			auto plan = net.CheckFullStep(state.snapshot, state.topology, clock, {}, fast);
+			CHECK(plan.stop.deadlock == (index == 3));
+			state.snapshot = std::move(plan.snapshotAfter);
+			clock = plan.clockAfter;
+		}
+		CHECK(output.GetToken() == 6);
+		CHECK(first.GetTokensCount() == 4);
+		CHECK(second.GetTokensCount() == 2);
+	}
+}
+
+TEST_CASE("Complete pure steps replay competing timers and alternate conflict winners", "[step-differential]")
+{
+	CHSimulationCharacterization net;
+	auto& input = net.Place(2);
+	auto& firstOutput = net.Place(0);
+	auto& secondOutput = net.Place(0);
+	auto& first = net.Transition(CHTransition::TTM_DELAY, 2);
+	auto& second = net.Transition(CHTransition::TTM_DELAY, 2);
+	net.Arc(input, first); net.Arc(input, second);
+	net.Arc(first, firstOutput); net.Arc(second, secondOutput);
+	auto state = net.BeginStepComparison();
+	auto clock = net.Clock();
+	for (int index = 0; index < 7; ++index)
+	{
+		hps::domain::StepRandomInputs random;
+		if (index == 2) { net.Seed(1); random.conflictChoices = {0}; }
+		if (index == 5) { net.Seed(10000); random.conflictChoices = {1}; }
+		auto plan = net.CheckFullStep(state.snapshot, state.topology, clock, random);
+		CHECK(plan.stop.deadlock == (index == 6));
+		state.snapshot = std::move(plan.snapshotAfter);
+		clock = plan.clockAfter;
+	}
+	CHECK(firstOutput.GetToken() == 1);
+	CHECK(secondOutput.GetToken() == 1);
+	CHECK(clock.timeMs == 4);
+}
+
+TEST_CASE("Complete pure steps replay stochastic delays without reading legacy samples", "[step-differential]")
+{
+	using namespace hps::domain;
+	for (auto mode : {CHTransition::TTM_EQUAL_DISTR, CHTransition::TTM_EXPONENTIAL})
+	{
+		CHSimulationCharacterization net;
+		auto& input = net.Place(2);
+		auto& output = net.Place(0);
+		auto& transition = net.Transition(mode, mode == CHTransition::TTM_EQUAL_DISTR ? 2 : 10, 7);
+		transition.SetDelay(0);
+		net.Arc(input, transition); net.Arc(transition, output);
+		auto state = net.BeginStepComparison();
+		auto clock = net.Clock();
+		net.Seed(1);
+		const int firstDelay = mode == CHTransition::TTM_EQUAL_DISTR ? 2 : 5;
+		const int secondDelay = mode == CHTransition::TTM_EQUAL_DISTR ? 4 : 10;
+		for (int index = 0; index <= firstDelay + 2; ++index)
+		{
+			StepRandomInputs random;
+			if (index == 0) random.delays.emplace(TransitionId{transition.Id()}, firstDelay);
+			if (index == firstDelay + 1) random.delays.emplace(TransitionId{transition.Id()}, secondDelay);
+			auto plan = net.CheckFullStep(state.snapshot, state.topology, clock, random);
+			CHECK(plan.stop.deadlock == (index == firstDelay + 2));
+			state.snapshot = std::move(plan.snapshotAfter);
+			clock = plan.clockAfter;
+		}
+		CHECK(output.GetToken() == 2);
+		CHECK(clock.timeMs == firstDelay);
+		CHECK(state.snapshot.transitionStates.at(TransitionId{transition.Id()}).remainingDelayMs == secondDelay);
+	}
+}
+
+TEST_CASE("Complete pure step retains mixed-arc policy and simultaneous limits", "[step-differential]")
+{
+	for (bool fast : {false, true})
+		for (auto kind : {CHConnector::TypeTest, CHConnector::TypeInhibitor})
+		{
+			CHSimulationCharacterization net;
+			auto& input = net.Place(2);
+			auto& read = net.Transition();
+			auto& first = net.Transition();
+			auto& second = net.Transition();
+			net.Arc(input, read, kind == CHConnector::TypeTest ? 1 : 3, kind);
+			net.Arc(input, first); net.Arc(input, second);
+			net.Limits(0, 0);
+			const auto state = net.BeginStepComparison();
+			net.Seed(1);
+			const auto plan = net.CheckFullStep(state.snapshot, state.topology, net.Clock(), {{0}, {}}, fast);
+			CHECK_FALSE(plan.stop.deadlock);
+			CHECK(plan.stop.timeLimitReached);
+			CHECK(plan.stop.stepLimitReached);
+			CHECK(input.GetToken() == 2);
+		}
 }

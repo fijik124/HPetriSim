@@ -1,5 +1,5 @@
 set(CMAKE_MFC_FLAG 0)
-add_library(hps_domain STATIC PetriNet.cpp SimulationRules.cpp TokenEffects.cpp Timing.cpp ConflictTopology.cpp ConflictSelection.cpp ConflictScan.cpp)
+add_library(hps_domain STATIC PetriNet.cpp SimulationRules.cpp TokenEffects.cpp Timing.cpp ConflictTopology.cpp ConflictSelection.cpp ConflictScan.cpp SimulationStep.cpp)
 target_include_directories(hps_domain PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_compile_features(hps_domain PUBLIC cxx_std_20)
 set_target_properties(hps_domain PROPERTIES CXX_EXTENSIONS OFF)

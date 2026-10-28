@@ -155,6 +155,12 @@ including 54 arc-kind/resource combinations. The original scan loop was moved
 unchanged to a private method so tests can call it without starting a worker.
 See [pre-scan semantics and compatibility limits](docs/conflict-scan.md).
 
+`PlanLegacySimulationStep` now combines these phases into a complete independent
+post-step snapshot, clock and stop flags. Eleven pure cases and four differential
+cases verify repeated stepping against the real legacy kernel using random
+inputs supplied before each step. It is not activated in the UI. See
+[complete-step contract and engine boundary](docs/simulation-step.md).
+
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all
 six sample files remain unchanged. Save/load round trips, editing, font preview,
