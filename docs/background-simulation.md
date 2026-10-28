@@ -99,11 +99,11 @@ ctest --test-dir build/vs2022-win32 -C Release -R '^simulation\.background$' --o
 
 ## Next boundary and rollback
 
-Add a document/application session boundary that creates the service from a
-validated offline legacy export, manages its closure, and projects result values
-for presentation. Establish document identity/lifetime and error reporting before
-enabling production simulation or writing results back to MFC objects. Cancellation
-latency is bounded by current step completion, not a fixed time guarantee.
+The subsequent [document session](document-session.md) creates services from
+validated offline exports with tagged identities, owner-thread controls,
+presentation values and explicit closure. MFC edit/close event binding and result
+application remain separate work. Cancellation latency is bounded by current step
+completion, not a fixed time guarantee.
 
 Rollback removes `BackgroundSimulation.*`, its source/Threads link, its test file
 and CTest entry. Controller/engine APIs and documents remain unchanged. Existing

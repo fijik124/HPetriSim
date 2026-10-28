@@ -113,7 +113,8 @@ ctest --test-dir build/vs2022-win32 -C Release -R domain --output-on-failure
 ```
 
 For a domain-only build, configure with `-DHPETRISIM_BUILD_MFC_APP=OFF`. Adding
-`-DBUILD_TESTING=OFF` builds the domain and synchronous engine libraries without downloading Catch2. This path
+`-DBUILD_TESTING=OFF` builds the domain, simulation and application libraries
+without downloading Catch2. This path
 does not require MFC and does not build the Windows UI or adapter.
 
 The pure `EvaluateLegacyEligibility` evaluator now covers pre-conflict arc and
@@ -182,6 +183,12 @@ It starts no worker and is not activated in the UI. See
 futures and immutable synchronized snapshots. Fourteen portable cases cover
 publication, pause/stop/reset, concurrent callers and joined shutdown. It is not
 connected to MFC documents yet. See [background ownership and closure](docs/background-simulation.md).
+
+`DocumentSimulationSession` now provides tagged document/session identities,
+owner-thread controls, value presentation and explicit closure. An offline MFC
+adapter copies exact model and simulation settings; ten portable and five legacy
+cases cover it, including all six sample archives. Document event hooks are not
+activated yet. See [session ownership and invalidation rules](docs/document-session.md).
 
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all

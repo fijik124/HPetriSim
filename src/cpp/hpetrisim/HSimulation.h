@@ -43,6 +43,9 @@ public:
 
 	long SampleTime() const { return m_SampleTime; }
 	void SampleTime(long val) { m_SampleTime = val; }
+	long StepCount() const { return m_StepCount; }
+	long TimeLimit() const { return m_TimeLimit; }
+	long StepLimit() const { return m_StepLimit; }
 
 	enum SimMode
 	{

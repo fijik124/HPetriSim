@@ -1,0 +1,8 @@
+set(CMAKE_MFC_FLAG 0)
+add_executable(hps_application_tests ../DocumentSimulationSessionTests.cpp)
+target_link_libraries(hps_application_tests PRIVATE hps_application Catch2::Catch2WithMain)
+if(MSVC)
+    target_compile_options(hps_application_tests PRIVATE /W4 /WX /permissive-)
+endif()
+add_test(NAME application.session COMMAND hps_application_tests "[session]")
+set_tests_properties(application.session PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)

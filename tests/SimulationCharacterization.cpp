@@ -2,6 +2,7 @@
 #include "PetriSimDoc.h"
 #include "resource.h"
 #include "adapters/LegacyNetAdapter.h"
+#include "adapters/LegacySessionAdapter.h"
 #include "domain/SimulationRules.h"
 #include "domain/TokenEffects.h"
 #include "domain/Timing.h"
@@ -404,6 +405,11 @@ TEST_CASE("Domain export rejects online state without starting a worker", "[adap
 	REQUIRE(issues.size() == 1);
 	CHECK(issues[0].code == hps::domain::ValidationCode::SnapshotUnavailable);
 	CHECK_FALSE(net.document.SimOnline());
+	const auto session = net.ExportWithOnlineFlag([](CPetriSimDoc& document) {
+		return hps::adapters::CreateLegacyDocumentSession(document, hps::application::DocumentId{1});
+	});
+	REQUIRE(std::holds_alternative<Issues>(session));
+	CHECK(std::get<Issues>(session).front().code == hps::domain::ValidationCode::SnapshotUnavailable);
 	const auto topology = net.ExportWithOnlineFlag(hps::adapters::ExportLegacySimulationSnapshot);
 	REQUIRE(std::holds_alternative<Issues>(topology));
 	REQUIRE(std::get<Issues>(topology).size() == 1);
@@ -1861,4 +1867,30 @@ TEST_CASE("Controller batches stop at simultaneous legacy limits and reset consi
 	net.CheckEngineState(controller.Snapshot(), true);
 	CHECK(controller.State() == RunState::Paused);
 	CHECK(controller.Resume() == ResumeResult::Running);
+}
+
+TEST_CASE("Legacy session preserves actual offline marking clock and timing settings", "[session-adapter]")
+{
+	using namespace hps::application;
+	CHSimulationCharacterization net;
+	auto& input = net.Place(2);
+	auto& transition = net.Transition(CHTransition::TTM_DELAY, 2);
+	net.Arc(input, transition);
+	net.SampleTime(3); net.Limits(19, 23); net.document.Sim().SimTime(7);
+	REQUIRE_FALSE(net.Step());
+	const auto before = net.Clock();
+	auto created = hps::adapters::CreateLegacyDocumentSession(net.document, DocumentId{55}, 123);
+	REQUIRE(std::holds_alternative<std::unique_ptr<DocumentSimulationSession>>(created));
+	auto session = std::get<std::unique_ptr<DocumentSimulationSession>>(std::move(created));
+	const auto snapshot = session->Snapshot();
+	CHECK(snapshot.publication->engine.clock.timeMs == before.timeMs);
+	CHECK(snapshot.publication->engine.clock.steps == before.steps);
+	CHECK(snapshot.publication->engine.clock.sampleTimeMs == before.sampleTimeMs);
+	CHECK(snapshot.publication->engine.clock.timeLimitMs == before.timeLimitMs);
+	CHECK(snapshot.publication->engine.clock.stepLimit == before.stepLimit);
+	CHECK(snapshot.publication->engine.random.value == 123);
+	CHECK(snapshot.publication->engine.net.transitionStates.at(hps::domain::TransitionId{transition.Id()}).remainingDelayMs == -1);
+	CHECK(input.GetToken() == 2); CHECK(transition.GetDelay() == -1);
+	CHECK_FALSE(net.document.SimOnline());
+	session->Close();
 }

@@ -1,0 +1,7 @@
+set(CMAKE_MFC_FLAG 0)
+add_library(hps_application STATIC DocumentSimulationSession.cpp)
+target_link_libraries(hps_application PUBLIC hps_simulation)
+set_target_properties(hps_application PROPERTIES CXX_EXTENSIONS OFF)
+if(MSVC)
+    target_compile_options(hps_application PRIVATE /W4 /WX /permissive-)
+endif()

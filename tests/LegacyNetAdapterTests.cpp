@@ -3,6 +3,7 @@
 #include "resource.h"
 #include "HRect.h"
 #include "adapters/LegacyNetAdapter.h"
+#include "adapters/LegacySessionAdapter.h"
 #include <catch2/catch_test_macros.hpp>
 #include <algorithm>
 #include <array>
@@ -439,4 +440,99 @@ TEST_CASE("Empty and drawing-only documents export empty topology", "[adapter-to
     const auto result = ExportLegacySimulationSnapshot(graph.document);
     REQUIRE(std::holds_alternative<LegacySimulationSnapshot>(result));
     CHECK(std::get<LegacySimulationSnapshot>(result).topology.empty());
+}
+
+TEST_CASE("Legacy session copies values without writing back source edits", "[session-adapter]")
+{
+    using namespace hps::application;
+    using namespace hps::simulation;
+    LegacyGraph graph;
+    auto& place = graph.Add<CHPosition>(); place.SetToken(1);
+    auto& transition = graph.Add<CHTransition>();
+    auto& arc = graph.Arc(place, transition);
+    auto created = hps::adapters::CreateLegacyDocumentSession(graph.document, DocumentId{51}, 99);
+    REQUIRE(std::holds_alternative<std::unique_ptr<DocumentSimulationSession>>(created));
+    auto session = std::get<std::unique_ptr<DocumentSimulationSession>>(std::move(created));
+    place.SetToken(0); place.SetTokenCount(55); place.Name(L"Edited"); arc.To(nullptr);
+    CHECK(session->Presentation().marking.at(PlaceId{place.Id()}).tokens == 1);
+    CHECK(session->Snapshot().publication->engine.random.value == 99);
+    auto pending = session->Submit(ServiceCommand::ResetLegacy);
+    REQUIRE(pending.completion.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    CHECK(pending.completion.get().outcome == CommandOutcome::Applied);
+    CHECK(place.GetTokenCount() == 55); CHECK(place.Name() == L"Edited");
+    CHECK_FALSE(arc.Connected()); CHECK_FALSE(graph.document.SimOnline());
+    session->Close();
+}
+
+TEST_CASE("Legacy session remains value-owned after source document and objects are destroyed", "[session-adapter]")
+{
+    using namespace hps::application;
+    using namespace hps::simulation;
+    std::unique_ptr<DocumentSimulationSession> session;
+    {
+        LegacyGraph graph;
+        auto& place = graph.Add<CHPosition>(); place.SetToken(1);
+        auto& transition = graph.Add<CHTransition>(); graph.Arc(place, transition);
+        auto created = hps::adapters::CreateLegacyDocumentSession(graph.document, DocumentId{52});
+        REQUIRE(std::holds_alternative<std::unique_ptr<DocumentSimulationSession>>(created));
+        session = std::get<std::unique_ptr<DocumentSimulationSession>>(std::move(created));
+    }
+    auto pending = session->Submit(ServiceCommand::Resume);
+    REQUIRE(pending.completion.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    CHECK(pending.completion.get().outcome == CommandOutcome::Applied);
+    auto snapshot = session->Snapshot();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!snapshot.publication->engine.stop.Locked() && std::chrono::steady_clock::now() < deadline)
+        snapshot = session->WaitForUpdate(snapshot.publication->revision, std::chrono::milliseconds(100));
+    CHECK(snapshot.publication->engine.stop.deadlock);
+    CHECK(snapshot.publication->engine.clock.steps == 2);
+    session->Close();
+}
+
+TEST_CASE("Legacy session reports export identity and clock errors explicitly", "[session-adapter]")
+{
+    using namespace hps::application;
+    LegacyGraph graph;
+    graph.Add<CHPosition>();
+    DocumentId id{53};
+    auto code = ValidationCode::DisconnectedArc;
+    SECTION("Disconnected") { graph.Add<CHConnector>(); }
+    SECTION("Clock") { graph.document.Sim().SampleTime(0); code = ValidationCode::InvalidSimulationSettings; }
+    SECTION("Identity") { id.value = 0; code = ValidationCode::InvalidId; }
+    const auto result = hps::adapters::CreateLegacyDocumentSession(graph.document, id);
+    REQUIRE(std::holds_alternative<std::vector<ValidationIssue>>(result));
+    CHECK(std::get<std::vector<ValidationIssue>>(result).front().code == code);
+}
+
+TEST_CASE("All sample archives create and close offline sessions without conversion", "[session-adapter][samples]")
+{
+    using namespace hps::application;
+    class LoadedDocument : public CPetriSimDoc
+    {
+    public:
+        ~LoadedDocument() override { DeleteContents(); }
+    };
+    for (const auto* name : {L"TokenGame", L"time_sample", L"demo_net", L"Philosophenproblem", L"prozess_connect", L"prozess_simple_connect"})
+    {
+        INFO(CStringA(name).GetString());
+        LoadedDocument document;
+        CFile file(CString(L"sample/") + name + L".hps", CFile::modeRead | CFile::shareDenyWrite);
+        CArchive archive(&file, CArchive::load); archive.m_pDocument = &document;
+        document.Serialize(archive);
+        auto created = hps::adapters::CreateLegacyDocumentSession(document, DocumentId{54});
+        std::string diagnostics;
+        if (const auto* issues = std::get_if<std::vector<ValidationIssue>>(&created))
+            for (const auto& issue : *issues) diagnostics += issue.message + "\n";
+        INFO(diagnostics);
+        REQUIRE(std::holds_alternative<std::unique_ptr<DocumentSimulationSession>>(created));
+        auto session = std::get<std::unique_ptr<DocumentSimulationSession>>(std::move(created));
+        CHECK(session->Presentation().state == hps::simulation::RunState::Paused);
+        CHECK(session->Presentation().clock.timeMs == document.Sim().SimTime());
+        CHECK(session->Presentation().clock.steps == document.Sim().StepCount());
+        CHECK(session->Presentation().clock.timeLimitMs == document.Sim().TimeLimit());
+        CHECK(session->Presentation().clock.stepLimit == document.Sim().StepLimit());
+        CHECK_FALSE(document.SimOnline());
+        session->Close();
+        CHECK(session->Completion().wait_for(std::chrono::milliseconds(0)) == std::future_status::ready);
+    }
 }
