@@ -99,10 +99,10 @@ ctest --test-dir build/vs2022-win32 -C Release -R '^(simulation\.seeded|simulati
 
 ## Next step and rollback
 
-Add a bounded synchronous run controller with explicit stop/pause/error results
-before introducing workers and concurrent snapshot publication. Keep replay tests
-and legacy policy. Existing unsafe shutdown still needs replacement before
-production integration.
+The subsequent [run controller](run-controller.md) adds bounded synchronous
+execution with explicit pause/stop/error results. Owning workers and synchronized
+snapshot publication follow separately. Keep replay tests and legacy policy;
+existing unsafe shutdown still needs replacement before production integration.
 
 Rollback removes `SeededStep.*`, its source/test registrations and three new
 legacy cases; restore engine declarations/implementation without random state.

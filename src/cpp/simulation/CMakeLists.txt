@@ -1,5 +1,5 @@
 set(CMAKE_MFC_FLAG 0)
-add_library(hps_simulation STATIC SimulationEngine.cpp SeededStep.cpp)
+add_library(hps_simulation STATIC SimulationEngine.cpp SeededStep.cpp RunController.cpp)
 target_link_libraries(hps_simulation PUBLIC hps_domain)
 set_target_properties(hps_simulation PROPERTIES CXX_EXTENSIONS OFF)
 if(MSVC)

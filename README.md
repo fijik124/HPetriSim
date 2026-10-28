@@ -172,6 +172,12 @@ legacy-compatible stream. Snapshots include its state; failed steps preserve it,
 legacy reset retains it and initial restoration rewinds it. Returned inputs
 support explicit replay. See [seeded simulation and verification](docs/seeded-simulation.md).
 
+`RunController` now executes bounded synchronous batches with explicit pause,
+stop, limit and error results. Fourteen portable cases and two legacy differential
+cases cover seeded continuation and retention of the last successful state.
+It starts no worker and is not activated in the UI. See
+[run state and cooperative request contract](docs/run-controller.md).
+
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all
 six sample files remain unchanged. Save/load round trips, editing, font preview,

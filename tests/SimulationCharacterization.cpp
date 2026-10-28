@@ -9,6 +9,7 @@
 #include "domain/ConflictScan.h"
 #include "domain/SimulationStep.h"
 #include "simulation/SimulationEngine.h"
+#include "simulation/RunController.h"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <memory>
@@ -1772,4 +1773,92 @@ TEST_CASE("Seeded timed simulation and legacy reset continue the same random str
 			CHECK(engine.Snapshot().random == randomBeforeReset);
 		}
 	}
+}
+
+TEST_CASE("Bounded controller pause and resume replay legacy timed steps through deadlock", "[controller-differential]")
+{
+	using namespace hps::simulation;
+	for (auto mode : {CHTransition::TTM_EQUAL_DISTR, CHTransition::TTM_EXPONENTIAL})
+	{
+		CHSimulationCharacterization net;
+		auto& input = net.Place(4);
+		auto& output = net.Place(0);
+		auto& transition = net.Transition(mode, mode == CHTransition::TTM_EQUAL_DISTR ? 2 : 10, 7);
+		transition.SetDelay(0);
+		net.Arc(input, transition); net.Arc(transition, output);
+		const auto prepared = net.BeginStepComparison();
+		auto created = SimulationEngine::Create(prepared.snapshot, prepared.topology, net.Clock(), 1);
+		REQUIRE(std::holds_alternative<SimulationEngine>(created));
+		RunController controller(std::get<SimulationEngine>(std::move(created)));
+		REQUIRE(controller.Resume() == ResumeResult::Running);
+		net.Seed(1);
+		bool stopped = false;
+		for (int index = 0; index < 100; ++index)
+		{
+			const auto before = controller.Snapshot();
+			const auto predicted = PlanSeededLegacyStep(before.net, prepared.topology, before.clock, before.random);
+			REQUIRE(std::holds_alternative<SeededStepPlan>(predicted));
+			const auto& plan = std::get<SeededStepPlan>(predicted);
+			const auto report = controller.RunBatch(1);
+			REQUIRE(report.completedSteps == 1);
+			net.CheckFullStep(before.net, prepared.topology, before.clock, plan.inputs);
+			net.CheckEngineState(report.snapshot);
+			CHECK(report.snapshot.random == plan.randomAfter);
+			if (report.reason == RunEndReason::SimulationStopped)
+			{
+				CHECK(report.snapshot.stop.deadlock);
+				stopped = true;
+				break;
+			}
+			CHECK(report.reason == RunEndReason::BudgetExhausted);
+			if (index == 2)
+			{
+				controller.Pause();
+				const auto paused = controller.RunBatch(20);
+				CHECK(paused.reason == RunEndReason::Paused); CHECK(paused.completedSteps == 0);
+				CHECK(paused.snapshot.random == report.snapshot.random);
+				net.CheckEngineState(paused.snapshot);
+				REQUIRE(controller.Resume() == ResumeResult::Running);
+			}
+		}
+		CHECK(stopped); CHECK(output.GetToken() == 4);
+		CHECK(controller.State() == RunState::Paused);
+		CHECK(controller.Resume() == ResumeResult::SimulationStopped);
+	}
+}
+
+TEST_CASE("Controller batches stop at simultaneous legacy limits and reset consistently", "[controller-differential]")
+{
+	using namespace hps::domain;
+	using namespace hps::simulation;
+	CHSimulationCharacterization net;
+	auto& input = net.Place(1);
+	CHPropertyValues properties;
+	properties.Add(CHPropertyValue(1L, ID_POSITION_TOKEN_INITIAL));
+	REQUIRE(input.SetProperties(properties, false));
+	auto& reader = net.Transition();
+	net.Arc(input, reader, 1, CHConnector::TypeTest);
+	net.Limits(2, 2);
+	const auto prepared = net.BeginStepComparison();
+	auto created = SimulationEngine::Create(prepared.snapshot, prepared.topology, net.Clock());
+	REQUIRE(std::holds_alternative<SimulationEngine>(created));
+	RunController controller(std::get<SimulationEngine>(std::move(created)));
+	REQUIRE(controller.Resume() == ResumeResult::Running);
+	const auto report = controller.RunBatch(20);
+	REQUIRE(report.completedSteps == 3);
+	CHECK(report.reason == RunEndReason::SimulationStopped);
+	auto model = prepared.snapshot;
+	auto clock = net.Clock();
+	for (int index = 0; index < 3; ++index)
+	{
+		auto plan = net.CheckFullStep(model, prepared.topology, clock, {}, false);
+		model = std::move(plan.snapshotAfter); clock = plan.clockAfter;
+	}
+	net.CheckEngineState(report.snapshot);
+	CHECK(report.snapshot.stop.timeLimitReached); CHECK(report.snapshot.stop.stepLimitReached);
+	CHECK(controller.RunBatch(20).completedSteps == 0);
+	controller.ResetLegacy(); net.Reset();
+	net.CheckEngineState(controller.Snapshot(), true);
+	CHECK(controller.State() == RunState::Paused);
+	CHECK(controller.Resume() == ResumeResult::Running);
 }
