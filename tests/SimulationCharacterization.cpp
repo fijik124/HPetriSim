@@ -8,6 +8,7 @@
 #include "domain/ConflictSelection.h"
 #include "domain/ConflictScan.h"
 #include "domain/SimulationStep.h"
+#include "simulation/SimulationEngine.h"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <memory>
@@ -324,6 +325,38 @@ public:
 		CHECK(plan.potentialConflicts == actualOrder);
 		CHECK(ValidateConflictTopology(expected, topology).empty());
 		return plan;
+	}
+	void CheckEngineState(const hps::simulation::EngineSnapshot& state, bool afterReset = false)
+	{
+		using namespace hps::domain;
+		const auto exported = hps::adapters::ExportLegacyNet(document);
+		REQUIRE(std::holds_alternative<NetSnapshot>(exported));
+		const auto& actual = std::get<NetSnapshot>(exported);
+		REQUIRE(state.net.marking.size() == actual.marking.size());
+		for (const auto& [id, value] : actual.marking)
+		{
+			CHECK(state.net.marking.at(id).tokens == value.tokens);
+			CHECK(state.net.marking.at(id).producedTokens == value.producedTokens);
+		}
+		REQUIRE(state.net.transitionStates.size() == actual.transitionStates.size());
+		for (const auto& [id, value] : actual.transitionStates)
+		{
+			const auto& copied = state.net.transitionStates.at(id);
+			CHECK(copied.remainingDelayMs == value.remainingDelayMs);
+			CHECK(copied.consumedTokens == value.consumedTokens);
+			CHECK(copied.active == value.active); CHECK(copied.enabled == value.enabled);
+		}
+		const auto clock = Clock();
+		CHECK(state.clock.timeMs == clock.timeMs); CHECK(state.clock.steps == clock.steps);
+		CHECK(state.clock.sampleTimeMs == clock.sampleTimeMs);
+		CHECK(state.clock.timeLimitMs == clock.timeLimitMs); CHECK(state.clock.stepLimit == clock.stepLimit);
+		if (afterReset) CHECK_FALSE(state.stop.Locked());
+		else
+		{
+			CHECK(state.stop.deadlock == Logged(L"Deadlock"));
+			CHECK(state.stop.timeLimitReached == (clock.timeMs > clock.timeLimitMs));
+			CHECK(state.stop.stepLimitReached == (clock.steps > clock.stepLimit));
+		}
 	}
 	void Conflict(CHTransition& transition) { document.Sim().m_ConflictedTransitions.Add(&transition); }
 	void Limits(long time, long steps)
@@ -1553,4 +1586,95 @@ TEST_CASE("Complete pure step retains mixed-arc policy and simultaneous limits",
 			CHECK(plan.stop.stepLimitReached);
 			CHECK(input.GetToken() == 2);
 		}
+}
+
+TEST_CASE("Engine step and legacy reset agree for every transition time mode", "[engine-differential]")
+{
+	using namespace hps::domain;
+	using hps::simulation::SimulationEngine;
+	for (auto mode : {CHTransition::TTM_IMMIDIATE, CHTransition::TTM_DELAY,
+		CHTransition::TTM_EQUAL_DISTR, CHTransition::TTM_EXPONENTIAL})
+	{
+		CHSimulationCharacterization net;
+		auto& input = net.Place(2);
+		CHPropertyValues properties;
+		properties.Add(CHPropertyValue(5L, ID_POSITION_TOKEN_INITIAL));
+		REQUIRE(input.SetProperties(properties, false));
+		input.SetToken(2); input.SetTokenCount(9);
+		auto& transition = net.Transition(mode, 5, 10);
+		transition.SetDelay(2); transition.SetTokensCount(7);
+		net.Arc(input, transition);
+		const auto prepared = net.BeginStepComparison();
+		auto created = SimulationEngine::Create(prepared.snapshot, prepared.topology, net.Clock());
+		REQUIRE(std::holds_alternative<SimulationEngine>(created));
+		auto engine = std::get<SimulationEngine>(std::move(created));
+		const auto before = engine.Snapshot();
+		REQUIRE(std::holds_alternative<SimulationStepPlan>(engine.Step()));
+		net.CheckFullStep(before.net, prepared.topology, before.clock);
+		net.CheckEngineState(engine.Snapshot());
+		engine.ResetLegacy(); net.Reset();
+		net.CheckEngineState(engine.Snapshot(), true);
+		CHECK(input.GetToken() == 5);
+		CHECK(transition.GetDelay() == (mode == CHTransition::TTM_IMMIDIATE ? 5 : 1));
+	}
+}
+
+TEST_CASE("Engine owns repeated chain steps and resumes after legacy reset", "[engine-differential]")
+{
+	using namespace hps::domain;
+	using hps::simulation::SimulationEngine;
+	CHSimulationCharacterization net;
+	auto& input = net.Place(4);
+	CHPropertyValues properties;
+	properties.Add(CHPropertyValue(4L, ID_POSITION_TOKEN_INITIAL));
+	REQUIRE(input.SetProperties(properties, false));
+	auto& middle = net.Place(0);
+	auto& output = net.Place(0);
+	auto& first = net.Transition(); auto& second = net.Transition();
+	net.Arc(input, first, 2); net.Arc(first, middle);
+	net.Arc(middle, second); net.Arc(second, output, 3);
+	const auto prepared = net.BeginStepComparison();
+	auto created = SimulationEngine::Create(prepared.snapshot, prepared.topology, net.Clock());
+	REQUIRE(std::holds_alternative<SimulationEngine>(created));
+	auto engine = std::get<SimulationEngine>(std::move(created));
+	for (int round = 0; round < 2; ++round)
+	{
+		for (int index = 0; index < 4; ++index)
+		{
+			const auto before = engine.Snapshot();
+			REQUIRE(std::holds_alternative<SimulationStepPlan>(engine.Step()));
+			net.CheckFullStep(before.net, prepared.topology, before.clock);
+			net.CheckEngineState(engine.Snapshot());
+		}
+		CHECK(output.GetToken() == 6);
+		engine.ResetLegacy(); net.Reset();
+		net.CheckEngineState(engine.Snapshot(), true);
+	}
+}
+
+TEST_CASE("Engine sample error leaves state untouched before successful legacy replay", "[engine-differential]")
+{
+	using namespace hps::domain;
+	using hps::simulation::SimulationEngine;
+	CHSimulationCharacterization net;
+	auto& input = net.Place(1);
+	auto& output = net.Place(0);
+	auto& transition = net.Transition(CHTransition::TTM_EQUAL_DISTR, 2, 7);
+	transition.SetDelay(0);
+	net.Arc(input, transition); net.Arc(transition, output);
+	const auto prepared = net.BeginStepComparison();
+	auto created = SimulationEngine::Create(prepared.snapshot, prepared.topology, net.Clock());
+	REQUIRE(std::holds_alternative<SimulationEngine>(created));
+	auto engine = std::get<SimulationEngine>(std::move(created));
+	const auto before = engine.Snapshot();
+	REQUIRE(std::holds_alternative<std::vector<ValidationIssue>>(engine.Step()));
+	net.CheckEngineState(engine.Snapshot());
+	net.Seed(1);
+	const StepRandomInputs random{{}, {{TransitionId{transition.Id()}, 2}}};
+	REQUIRE(std::holds_alternative<SimulationStepPlan>(engine.Step(random)));
+	net.CheckFullStep(before.net, prepared.topology, before.clock, random);
+	net.CheckEngineState(engine.Snapshot());
+	engine.ResetLegacy(); net.Reset();
+	net.CheckEngineState(engine.Snapshot(), true);
+	CHECK(transition.GetDelay() == 2);
 }

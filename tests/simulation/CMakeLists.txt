@@ -1,0 +1,7 @@
+set(CMAKE_MFC_FLAG 0)
+add_executable(hps_engine_tests ../SimulationEngineTests.cpp)
+target_link_libraries(hps_engine_tests PRIVATE hps_simulation Catch2::Catch2WithMain)
+if(MSVC)
+    target_compile_options(hps_engine_tests PRIVATE /W4 /WX /permissive-)
+endif()
+add_test(NAME simulation.engine COMMAND hps_engine_tests "[engine]")

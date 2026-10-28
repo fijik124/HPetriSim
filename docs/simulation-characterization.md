@@ -131,6 +131,10 @@ The subsequent [complete-step composition](simulation-step.md) predicts every
 model field and clock/stop result before the legacy step. Its repeated-step tests
 carry the pure result forward independently of subsequent legacy exports.
 
+The subsequent [engine extraction](simulation-engine.md) compares owned engine
+state with the real kernel and document reset, including all four delay modes.
+It distinguishes legacy reset from restoring the exact engine-creation snapshot.
+
 The subsequent [conflict characterization](conflict-characterization.md) adds
 eight separately tagged cases, including three new defect cases. It demonstrates
 the need to project actual adjacency order before extracting selection. The

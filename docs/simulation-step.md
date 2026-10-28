@@ -104,11 +104,12 @@ ctest --test-dir build/vs2022-win32 -C Release -R '^domain\.(simulation-step|ste
 
 ## Next boundary and rollback
 
-Add a synchronous engine that owns validated initial/current state and commits a
-successful step as a whole, with explicit reset semantics and error handling.
-Keep random inputs explicit until a separately tested per-engine seeded RNG
-boundary exists. Run/pause scheduling, cooperative background shutdown,
-thread-safe publication and production UI integration follow as separate stages.
+The subsequent [synchronous engine](simulation-engine.md) owns initial/current
+state and commits successful steps as a whole, with separate legacy-reset and
+exact initial-restoration operations. Random inputs remain explicit until a
+separately tested per-engine seeded RNG boundary exists. Run/pause scheduling,
+cooperative background shutdown, thread-safe publication and production UI
+integration follow as separate stages.
 
 Rollback removes `SimulationStep.*`, its source entry, `SimulationStepTests.cpp`,
 the two CTest registrations, and full-step fixture helpers/four cases. Existing

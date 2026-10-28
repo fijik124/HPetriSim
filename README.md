@@ -113,7 +113,7 @@ ctest --test-dir build/vs2022-win32 -C Release -R domain --output-on-failure
 ```
 
 For a domain-only build, configure with `-DHPETRISIM_BUILD_MFC_APP=OFF`. Adding
-`-DBUILD_TESTING=OFF` builds just the library without downloading Catch2. This path
+`-DBUILD_TESTING=OFF` builds the domain and synchronous engine libraries without downloading Catch2. This path
 does not require MFC and does not build the Windows UI or adapter.
 
 The pure `EvaluateLegacyEligibility` evaluator now covers pre-conflict arc and
@@ -160,6 +160,12 @@ post-step snapshot, clock and stop flags. Eleven pure cases and four differentia
 cases verify repeated stepping against the real legacy kernel using random
 inputs supplied before each step. It is not activated in the UI. See
 [complete-step contract and engine boundary](docs/simulation-step.md).
+
+The separate `hps_simulation` library now provides a synchronous `SimulationEngine`
+with owned state, transactional stepping, independent snapshots, legacy document
+reset and exact initial-snapshot restoration. Twelve portable cases and three
+legacy differential cases cover it. It is not activated in the UI. See
+[engine ownership and reset semantics](docs/simulation-engine.md).
 
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all

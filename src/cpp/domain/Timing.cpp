@@ -4,12 +4,9 @@
 
 namespace hps::domain
 {
-TimingResult PlanLegacyTiming(const NetSnapshot& snapshot,
-    const std::vector<TransitionId>& selected, const StepClock& clock,
-    const SampledDelays& samples)
+std::vector<ValidationIssue> ValidateLegacyTimingSettings(
+    const NetSnapshot& snapshot, const StepClock& clock)
 {
-    const auto effect = PlanLegacyTokenEffects(snapshot, selected);
-    if (const auto* issues = std::get_if<std::vector<ValidationIssue>>(&effect)) return *issues;
     constexpr std::int64_t maximum = std::numeric_limits<std::int32_t>::max();
     std::vector<ValidationIssue> issues;
     auto clockRange = [&](std::int64_t value, std::int64_t minimum, const char* message) {
@@ -21,13 +18,27 @@ TimingResult PlanLegacyTiming(const NetSnapshot& snapshot,
     clockRange(clock.sampleTimeMs, 1, "Sample interval must be positive and fit the signed 32-bit legacy range");
     clockRange(clock.timeLimitMs, 0, "Time limit must fit the nonnegative signed 32-bit legacy range");
     clockRange(clock.stepLimit, 0, "Step limit must fit the nonnegative signed 32-bit legacy range");
-    std::set<TransitionId> selection(selected.begin(), selected.end());
-    std::set<TransitionId> needsSample;
     for (const auto& transition : snapshot.net.transitions)
     {
         if (transition.initialDelayMs > maximum ||
             (transition.mode == TimeMode::Uniform && transition.rangeMaxDelayMs > maximum))
             issues.push_back({ValidationCode::UnsupportedLegacyRange, transition.id.value, "Timing configuration exceeds the signed 32-bit legacy range"});
+    }
+    return issues;
+}
+
+TimingResult PlanLegacyTiming(const NetSnapshot& snapshot,
+    const std::vector<TransitionId>& selected, const StepClock& clock,
+    const SampledDelays& samples)
+{
+    const auto effect = PlanLegacyTokenEffects(snapshot, selected);
+    if (const auto* issues = std::get_if<std::vector<ValidationIssue>>(&effect)) return *issues;
+    constexpr std::int64_t maximum = std::numeric_limits<std::int32_t>::max();
+    auto issues = ValidateLegacyTimingSettings(snapshot, clock);
+    std::set<TransitionId> selection(selected.begin(), selected.end());
+    std::set<TransitionId> needsSample;
+    for (const auto& transition : snapshot.net.transitions)
+    {
         if (!selection.contains(transition.id) ||
             (transition.mode != TimeMode::Uniform && transition.mode != TimeMode::Exponential)) continue;
         needsSample.insert(transition.id);

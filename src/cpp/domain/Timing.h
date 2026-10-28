@@ -33,6 +33,11 @@ struct TimingPlan
 };
 using TimingResult = std::variant<TimingPlan, std::vector<ValidationIssue>>;
 
+// Settings/range checks only; does not step, select or require random samples.
+// Snapshot invariants are validated separately by the caller.
+std::vector<ValidationIssue> ValidateLegacyTimingSettings(
+    const NetSnapshot& snapshot, const StepClock& clock);
+
 // Samples are final resampled delays for selected stochastic transitions only.
 // This function does not generate randomness or mutate input. Selection remains
 // the caller's responsibility; token effects are validated before timing.
