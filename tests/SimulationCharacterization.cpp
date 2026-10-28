@@ -954,3 +954,198 @@ TEST_CASE("Legacy normal output retains simultaneous stop reasons", "[timing-dif
 	CHECK(net.Time() == 2);
 	CHECK(net.Steps() == 1);
 }
+
+TEST_CASE("Conflict winners follow seeded draws and connector order", "[conflict-characterization][random]")
+{
+	// Recorded MSVC first-draw indices for RandLong(0, 2), not a portable RNG contract.
+	const unsigned seeds[] = {1, 5000, 5010, 10000};
+	const int winners[] = {0, 0, 1, 1};
+	for (int sample = 0; sample < 4; ++sample)
+		for (bool reverse : {false, true})
+		{
+			INFO("seed=" << seeds[sample] << ", reverse=" << reverse);
+			CHSimulationCharacterization net;
+			auto& input = net.Place(2);
+			auto& first = net.Transition();
+			auto& second = net.Transition();
+			if (reverse) { net.Arc(input, second); net.Arc(input, first); }
+			else { net.Arc(input, first); net.Arc(input, second); }
+			net.Conflict(first);
+			net.Conflict(second);
+			net.Seed(seeds[sample]);
+			CHECK_FALSE(net.Step());
+			const bool firstWins = (winners[sample] == 0) != reverse;
+			CHECK(first.Activ() == firstWins);
+			CHECK(second.Activ() == !firstWins);
+			CHECK(input.GetToken() == 1);
+		}
+}
+
+TEST_CASE("Meet conflicts select one producer even with spare capacity", "[conflict-characterization][legacy-policy]")
+{
+	CHSimulationCharacterization net;
+	auto& output = net.Place(0, 10);
+	auto& first = net.Transition();
+	auto& second = net.Transition();
+	net.Arc(first, output);
+	net.Arc(second, output);
+	net.Conflict(first);
+	net.Conflict(second);
+	net.Seed(1);
+	CHECK_FALSE(net.Step());
+	CHECK(first.Activ());
+	CHECK_FALSE(second.Activ());
+	CHECK(output.GetToken() == 1);
+}
+
+TEST_CASE("Branch selection indexes all arcs including read-only arcs", "[conflict-characterization][legacy-defect]")
+{
+	for (auto kind : {CHConnector::TypeTest, CHConnector::TypeInhibitor})
+	{
+		CHSimulationCharacterization net;
+		auto& input = net.Place(2);
+		auto& read = net.Transition();
+		auto& first = net.Transition();
+		auto& second = net.Transition();
+		net.Arc(input, read, kind == CHConnector::TypeTest ? 1 : 3, kind);
+		net.Arc(input, first);
+		net.Arc(input, second);
+		net.Conflict(read);
+		net.Conflict(first);
+		net.Conflict(second);
+		net.Seed(1); // Two active normal arcs counted, raw index zero retained.
+		CHECK_FALSE(net.Step());
+		CHECK(read.Activ());
+		CHECK_FALSE(first.Activ());
+		CHECK_FALSE(second.Activ());
+		CHECK(input.GetToken() == 2);
+		CHECK(net.Time() == 1);
+	}
+}
+
+TEST_CASE("Meet selection indexes all arcs including read-only arcs", "[conflict-characterization][legacy-defect]")
+{
+	for (auto kind : {CHConnector::TypeTest, CHConnector::TypeInhibitor})
+	{
+		CHSimulationCharacterization net;
+		auto& output = net.Place(0, 10);
+		auto& read = net.Transition();
+		auto& first = net.Transition();
+		auto& second = net.Transition();
+		net.Arc(read, output, 1, kind);
+		net.Arc(first, output);
+		net.Arc(second, output);
+		net.Conflict(read);
+		net.Conflict(first);
+		net.Conflict(second);
+		net.Seed(1);
+		CHECK_FALSE(net.Step());
+		CHECK(read.Activ());
+		CHECK_FALSE(first.Activ());
+		CHECK_FALSE(second.Activ());
+		CHECK(output.GetToken() == 0);
+		CHECK(net.Time() == 1);
+	}
+}
+
+TEST_CASE("Parallel normal arcs can disable their own sole transition", "[conflict-characterization][legacy-defect]")
+{
+	for (unsigned seed : {1U, 10000U})
+	{
+		CHSimulationCharacterization net;
+		auto& input = net.Place(2);
+		auto& transition = net.Transition();
+		net.Arc(input, transition);
+		net.Arc(input, transition);
+		net.Conflict(transition);
+		net.Seed(seed);
+		CHECK(net.Step());
+		CHECK_FALSE(transition.Activ());
+		CHECK(input.GetToken() == 2);
+		CHECK(net.Logged(L"Deadlock"));
+	}
+}
+
+TEST_CASE("A branch loser still processes its remaining input conflicts", "[conflict-characterization][legacy-policy]")
+{
+	CHSimulationCharacterization net;
+	auto& left = net.Place(1);
+	auto& right = net.Place(1);
+	auto& current = net.Transition();
+	auto& leftPeer = net.Transition();
+	auto& rightFirst = net.Transition();
+	auto& rightSecond = net.Transition();
+	net.Arc(left, leftPeer);
+	net.Arc(left, current);
+	net.Arc(right, rightFirst);
+	net.Arc(right, rightSecond);
+	net.Arc(right, current);
+	// Only register current: isolates continuation within its one outer iteration.
+	net.Conflict(current);
+	net.Seed(1); // Raw indices zero then one.
+	CHECK_FALSE(net.Step());
+	CHECK_FALSE(current.Activ());
+	CHECK(leftPeer.Activ());
+	CHECK_FALSE(rightFirst.Activ());
+	CHECK(rightSecond.Activ());
+	CHECK(left.GetToken() == 0);
+	CHECK(right.GetToken() == 0);
+}
+
+TEST_CASE("A branch loser still processes its output meet conflicts", "[conflict-characterization][legacy-policy]")
+{
+	CHSimulationCharacterization net;
+	auto& input = net.Place(1);
+	auto& output = net.Place(0, 10);
+	auto& current = net.Transition();
+	auto& branchPeer = net.Transition();
+	auto& meetFirst = net.Transition();
+	auto& meetSecond = net.Transition();
+	net.Arc(input, branchPeer);
+	net.Arc(input, current);
+	net.Arc(meetFirst, output);
+	net.Arc(meetSecond, output);
+	net.Arc(current, output);
+	net.Conflict(current);
+	net.Seed(1);
+	CHECK_FALSE(net.Step());
+	CHECK_FALSE(current.Activ());
+	CHECK(branchPeer.Activ());
+	CHECK_FALSE(meetFirst.Activ());
+	CHECK(meetSecond.Activ());
+	CHECK(input.GetToken() == 0);
+	CHECK(output.GetToken() == 1);
+}
+
+TEST_CASE("Reconnecting an arc changes conflict order without changing document order", "[conflict-characterization][legacy-policy]")
+{
+	using namespace hps::domain;
+	for (bool branch : {true, false})
+	{
+		CHSimulationCharacterization net;
+		auto& place = net.Place(branch ? 2 : 0, 10);
+		auto& first = net.Transition();
+		auto& second = net.Transition();
+		auto& firstArc = branch ? net.Arc(place, first) : net.Arc(first, place);
+		auto& secondArc = branch ? net.Arc(place, second) : net.Arc(second, place);
+		if (branch) { firstArc.From(nullptr); firstArc.From(&place); }
+		else { firstArc.To(nullptr); firstArc.To(&place); }
+		auto& adjacency = branch ? place.ConnectorsOut() : place.ConnectorsIn();
+		REQUIRE(adjacency.GetCount() == 2);
+		CHECK(adjacency[0] == &secondArc);
+		CHECK(adjacency[1] == &firstArc);
+		const auto exported = hps::adapters::ExportLegacyNet(net.document);
+		REQUIRE(std::holds_alternative<NetSnapshot>(exported));
+		const auto& arcs = std::get<NetSnapshot>(exported).net.arcs;
+		REQUIRE(arcs.size() == 2);
+		CHECK(arcs[0].id.value == firstArc.Id());
+		CHECK(arcs[1].id.value == secondArc.Id());
+		net.Conflict(first);
+		net.Conflict(second);
+		net.Seed(1);
+		CHECK_FALSE(net.Step());
+		CHECK_FALSE(first.Activ());
+		CHECK(second.Activ());
+		CHECK(place.GetToken() == 1);
+	}
+}

@@ -122,3 +122,9 @@ each step using the selection supplied by the legacy kernel. The subsequent
 [timing extraction](timing.md) compares delays, logical time, step counts and stop
 reasons using explicit stochastic samples. Conflict policy and background lifetime
 still need extraction and verification.
+
+The subsequent [conflict characterization](conflict-characterization.md) adds
+eight separately tagged cases, including three new defect cases. It demonstrates
+the need to project actual adjacency order before extracting selection. The
+original 23 `[simulation]` cases and their historical verification table above
+remain unchanged.

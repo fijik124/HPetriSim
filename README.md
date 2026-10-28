@@ -133,6 +133,11 @@ differential cases cover it; the fixture also compares timing on every legacy
 step. Random generation and conflict selection remain outside this API. See
 [timing behavior and verification](docs/timing.md).
 
+Eight additional legacy conflict cases cover adjacency order, mixed arc kinds,
+parallel arcs and conflict continuation. Reconnection proves that document arc
+order alone cannot replay selection; topology projection is the next boundary.
+See [conflict characterization and extraction requirements](docs/conflict-characterization.md).
+
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all
 six sample files remain unchanged. Save/load round trips, editing, font preview,

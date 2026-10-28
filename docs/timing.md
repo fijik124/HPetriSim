@@ -109,7 +109,9 @@ Remove `Timing.*`, its domain source entry, the two new validation codes,
 and four dedicated cases. Existing eligibility/token-effect planning can remain.
 No user document conversion or production UI rollback is needed.
 
-Next, characterize and extract conflict selection with explicit random inputs,
+The subsequent [conflict characterization](conflict-characterization.md) records
+additional behavior and proves that adjacency order needs explicit projection.
+Next, project that topology and extract selection with explicit random inputs,
 keeping the known selection-index defect visible as a compatibility decision.
 Only then compose these phases into a complete deterministic step. Full reset,
 random generation, a background engine, cooperative shutdown, thread-safe

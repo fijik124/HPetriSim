@@ -84,6 +84,9 @@ if(BUILD_TESTING)
     target_precompile_headers(hps_simulation_tests PRIVATE src/cpp/hpetrisim/stdafx.h)
     target_link_libraries(hps_simulation_tests PRIVATE Catch2::Catch2 hps_legacy_adapter gdiplus winmm)
     add_test(NAME simulation.characterization COMMAND hps_simulation_tests "[simulation]")
+    add_test(NAME simulation.conflicts COMMAND hps_simulation_tests "[conflict-characterization]")
+    set_tests_properties(simulation.conflicts PROPERTIES
+        TIMEOUT 30 RUN_SERIAL TRUE LABELS "simulation;characterization")
     set_tests_properties(simulation.characterization PROPERTIES
         TIMEOUT 30 RUN_SERIAL TRUE LABELS "simulation;characterization")
     add_test(NAME domain.legacy-adapter COMMAND hps_simulation_tests "[adapter]")
