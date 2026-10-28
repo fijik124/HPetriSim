@@ -13,7 +13,7 @@ SimulationEngine::SimulationEngine(EngineSnapshot initial, domain::ConflictTopol
 
 std::variant<SimulationEngine, std::vector<domain::ValidationIssue>> SimulationEngine::Create(
     const domain::NetSnapshot& snapshot, const domain::ConflictTopology& topology,
-    const domain::StepClock& clock)
+    const domain::StepClock& clock, std::uint32_t seed)
 {
     auto issues = domain::ValidateConflictTopology(snapshot, topology);
     if (!issues.empty()) return issues;
@@ -22,7 +22,7 @@ std::variant<SimulationEngine, std::vector<domain::ValidationIssue>> SimulationE
     issues = domain::ValidateLegacyTimingSettings(snapshot, clock);
     if (!issues.empty()) return issues;
     return SimulationEngine({snapshot, clock,
-        {false, clock.timeMs > clock.timeLimitMs, clock.steps > clock.stepLimit}}, topology);
+        {false, clock.timeMs > clock.timeLimitMs, clock.steps > clock.stepLimit}, {seed}}, topology);
 }
 
 EngineSnapshot SimulationEngine::Snapshot() const { return current_; }
@@ -33,7 +33,18 @@ domain::SimulationStepResult SimulationEngine::Step(const domain::StepRandomInpu
     if (const auto* plan = std::get_if<domain::SimulationStepPlan>(&result))
     {
         // Copy/allocate first. Assignment cannot throw and commits all fields together.
-        EngineSnapshot candidate{plan->snapshotAfter, plan->clockAfter, plan->stop};
+        EngineSnapshot candidate{plan->snapshotAfter, plan->clockAfter, plan->stop, current_.random};
+        current_ = std::move(candidate);
+    }
+    return result;
+}
+
+SeededStepResult SimulationEngine::StepSeeded()
+{
+    auto result = PlanSeededLegacyStep(current_.net, topology_, current_.clock, current_.random);
+    if (const auto* plan = std::get_if<SeededStepPlan>(&result))
+    {
+        EngineSnapshot candidate{plan->step.snapshotAfter, plan->step.clockAfter, plan->step.stop, plan->randomAfter};
         current_ = std::move(candidate);
     }
     return result;

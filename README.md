@@ -167,6 +167,11 @@ reset and exact initial-snapshot restoration. Twelve portable cases and three
 legacy differential cases cover it. It is not activated in the UI. See
 [engine ownership and reset semantics](docs/simulation-engine.md).
 
+`StepSeeded()` now generates per-engine deterministic inputs using an explicit
+legacy-compatible stream. Snapshots include its state; failed steps preserve it,
+legacy reset retains it and initial restoration rewinds it. Returned inputs
+support explicit replay. See [seeded simulation and verification](docs/seeded-simulation.md).
+
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all
 six sample files remain unchanged. Save/load round trips, editing, font preview,

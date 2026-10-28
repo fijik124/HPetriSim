@@ -1678,3 +1678,98 @@ TEST_CASE("Engine sample error leaves state untouched before successful legacy r
 	net.CheckEngineState(engine.Snapshot(), true);
 	CHECK(transition.GetDelay() == 2);
 }
+
+TEST_CASE("Private random stream matches CRT draws without changing CRT state", "[seeded-differential]")
+{
+	using namespace hps::simulation;
+	for (unsigned seed : {0U, 1U, 5000U, 5010U, 10000U, (std::numeric_limits<unsigned>::max)()})
+	{
+		INFO("seed=" << seed);
+		LegacyRandom generator({seed});
+		std::srand(seed);
+		for (int index = 0; index < 256; ++index)
+			CHECK(generator.Next15() == static_cast<unsigned>(std::rand()));
+	}
+	CHSimulationCharacterization net;
+	auto& input = net.Place(2);
+	auto& transition = net.Transition(CHTransition::TTM_EQUAL_DISTR, 2, 7);
+	transition.SetDelay(0); net.Arc(input, transition);
+	const auto prepared = net.BeginStepComparison();
+	auto created = SimulationEngine::Create(prepared.snapshot, prepared.topology, net.Clock(), 1);
+	REQUIRE(std::holds_alternative<SimulationEngine>(created));
+	auto engine = std::get<SimulationEngine>(std::move(created));
+	std::srand(1);
+	REQUIRE(std::holds_alternative<SeededStepPlan>(engine.StepSeeded()));
+	CHECK(std::rand() == 41); // Engine did not consume the process-wide draw.
+}
+
+TEST_CASE("Seeded engine replays changing branch meet and delay draws against legacy", "[seeded-differential]")
+{
+	using namespace hps::simulation;
+	CHSimulationCharacterization net;
+	auto& input = net.Place(4);
+	auto& output = net.Place(0, 10);
+	auto& branchTimed = net.Transition(CHTransition::TTM_EQUAL_DISTR, 2, 7);
+	branchTimed.SetDelay(0);
+	auto& branchOther = net.Transition();
+	auto& meetOther = net.Transition();
+	auto& meetTimed = net.Transition(CHTransition::TTM_EXPONENTIAL, 10);
+	meetTimed.SetDelay(0);
+	net.Arc(input, branchTimed); net.Arc(input, branchOther);
+	net.Arc(meetOther, output); net.Arc(meetTimed, output);
+	const auto prepared = net.BeginStepComparison();
+	auto created = SimulationEngine::Create(prepared.snapshot, prepared.topology, net.Clock(), 1);
+	REQUIRE(std::holds_alternative<SimulationEngine>(created));
+	auto engine = std::get<SimulationEngine>(std::move(created));
+	net.Seed(1);
+	for (int index = 0; index < 20; ++index)
+	{
+		const auto before = engine.Snapshot();
+		const auto result = engine.StepSeeded();
+		REQUIRE(std::holds_alternative<SeededStepPlan>(result));
+		const auto& plan = std::get<SeededStepPlan>(result);
+		net.CheckFullStep(before.net, prepared.topology, before.clock, plan.inputs);
+		net.CheckEngineState(engine.Snapshot());
+		if (plan.step.stop.Locked()) break;
+	}
+}
+
+TEST_CASE("Seeded timed simulation and legacy reset continue the same random stream", "[seeded-differential]")
+{
+	using namespace hps::simulation;
+	for (auto mode : {CHTransition::TTM_EQUAL_DISTR, CHTransition::TTM_EXPONENTIAL})
+	{
+		CHSimulationCharacterization net;
+		auto& input = net.Place(4);
+		CHPropertyValues properties;
+		properties.Add(CHPropertyValue(4L, ID_POSITION_TOKEN_INITIAL));
+		REQUIRE(input.SetProperties(properties, false));
+		auto& output = net.Place(0);
+		auto& transition = net.Transition(mode, mode == CHTransition::TTM_EQUAL_DISTR ? 2 : 10, 7);
+		transition.SetDelay(0);
+		net.Arc(input, transition); net.Arc(transition, output);
+		const auto prepared = net.BeginStepComparison();
+		auto created = SimulationEngine::Create(prepared.snapshot, prepared.topology, net.Clock(), 1);
+		REQUIRE(std::holds_alternative<SimulationEngine>(created));
+		auto engine = std::get<SimulationEngine>(std::move(created));
+		net.Seed(1);
+		for (int round = 0; round < 2; ++round)
+		{
+			for (int index = 0; index < 100 && output.GetToken() < 2; ++index)
+			{
+				const auto before = engine.Snapshot();
+				const auto result = engine.StepSeeded();
+				REQUIRE(std::holds_alternative<SeededStepPlan>(result));
+				const auto& plan = std::get<SeededStepPlan>(result);
+				net.CheckFullStep(before.net, prepared.topology, before.clock, plan.inputs);
+				net.CheckEngineState(engine.Snapshot());
+				REQUIRE_FALSE(plan.step.stop.Locked());
+			}
+			CHECK(output.GetToken() == 2);
+			const auto randomBeforeReset = engine.Snapshot().random;
+			engine.ResetLegacy(); net.Reset();
+			net.CheckEngineState(engine.Snapshot(), true);
+			CHECK(engine.Snapshot().random == randomBeforeReset);
+		}
+	}
+}

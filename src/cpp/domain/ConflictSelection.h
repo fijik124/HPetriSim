@@ -19,6 +19,20 @@ struct ConflictSelectionPlan
     std::vector<ConflictDecision> decisions;
 };
 using ConflictSelectionResult = std::variant<ConflictSelectionPlan, std::vector<ValidationIssue>>;
+struct ConflictChoiceRequest
+{
+    ConflictKind kind;
+    TransitionId visitedTransition;
+    PlaceId place;
+    std::size_t activeNormalArcCount;
+};
+using ConflictProgress = std::variant<ConflictSelectionPlan, ConflictChoiceRequest, std::vector<ValidationIssue>>;
+
+// Replays a validated prefix and requests its next choice without generating it.
+// Invalid/extra choices are errors; no partial mutable state escapes.
+ConflictProgress ContinueLegacyConflictSelection(const NetSnapshot& snapshot,
+    const ConflictTopology& topology, const std::vector<TransitionId>& conflictOrder,
+    const std::vector<std::int64_t>& choices);
 
 // Explicit legacy compatibility policy: count active normal arcs, but select a
 // raw adjacency index (including the known inactive/mixed/parallel-arc defects).

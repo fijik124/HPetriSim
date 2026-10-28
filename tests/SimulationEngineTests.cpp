@@ -34,6 +34,7 @@ SimulationEngine Engine(const Net& net, const StepClock& clock = {})
 }
 void Same(const EngineSnapshot& a, const EngineSnapshot& b)
 {
+    CHECK(a.random == b.random);
     CHECK(a.clock.timeMs == b.clock.timeMs); CHECK(a.clock.steps == b.clock.steps);
     CHECK(a.clock.sampleTimeMs == b.clock.sampleTimeMs);
     CHECK(a.clock.timeLimitMs == b.clock.timeLimitMs); CHECK(a.clock.stepLimit == b.clock.stepLimit);

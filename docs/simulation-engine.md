@@ -2,7 +2,7 @@
 
 `src/cpp/simulation/SimulationEngine.*` introduces the separate simulation layer.
 The standard C++20 `hps_simulation` target links `hps_domain`; it has no MFC,
-Win32, random generator, worker or UI dependency. The legacy application does not
+Win32, worker or UI dependency. The legacy application does not
 use it yet.
 
 ## Ownership and creation
@@ -99,10 +99,10 @@ ctest --test-dir build/vs2022-win32 -C Release -R '^simulation\.engine' --output
 
 ## Next boundary and rollback
 
-Introduce a per-engine deterministic random-input boundary with explicit seed,
-state/replay semantics and failure handling, keeping the legacy policy and known
-sample traces visible. Then add run/pause scheduling and cooperative background
-lifetime over the synchronous engine. Snapshots are currently value-isolated,
+The subsequent [seeded simulation](seeded-simulation.md) adds a per-engine stream,
+automatic input planning and transactional random-state ownership while retaining
+explicit stepping. Next, add scheduling and cooperative background lifetime.
+Snapshots are currently value-isolated,
 not safe for concurrent access; an owning controller must serialize access.
 Do not activate the engine in the editor before those boundaries are verified.
 

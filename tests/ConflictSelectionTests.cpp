@@ -207,3 +207,37 @@ TEST_CASE("Selection uses endpoint order independently of document arc order", "
     CHECK(Plan(net, {first, second}, {0}).selectedInNetOrder == std::vector<TransitionId>{second});
     CHECK(net.snapshot.net.arcs.front().id == ArcId{10});
 }
+
+TEST_CASE("Selection requests its next choice from a validated prefix", "[conflict-selection]")
+{
+    const Net net;
+    const auto pending = ContinueLegacyConflictSelection(net.snapshot, net.topology, {first, second}, {});
+    REQUIRE(std::holds_alternative<ConflictChoiceRequest>(pending));
+    const auto& request = std::get<ConflictChoiceRequest>(pending);
+    CHECK(request.kind == ConflictKind::Branch); CHECK(request.place == place);
+    CHECK(request.visitedTransition == first); CHECK(request.activeNormalArcCount == 2);
+    const auto completed = ContinueLegacyConflictSelection(net.snapshot, net.topology, {first, second}, {1});
+    REQUIRE(std::holds_alternative<ConflictSelectionPlan>(completed));
+    CHECK(std::get<ConflictSelectionPlan>(completed).selectedInNetOrder == std::vector<TransitionId>{second});
+}
+TEST_CASE("Selection prefix errors are distinct from a request for more input", "[conflict-selection]")
+{
+    const Net net;
+    for (const auto& prefix : std::vector<std::vector<std::int64_t>>{{-1}, {2}, {0, 1}})
+        CHECK(std::holds_alternative<std::vector<ValidationIssue>>(
+            ContinueLegacyConflictSelection(net.snapshot, net.topology, {first, second}, prefix)));
+}
+TEST_CASE("Selection requests later choices using the state produced by the prefix", "[conflict-selection]")
+{
+    Net net;
+    net.Transition(third);
+    net.topology.at(place).outgoing = {ArcId{11}, ArcId{10}};
+    net.Arc(other, second); net.Arc(other, third); net.Arc(other, first);
+    const auto next = ContinueLegacyConflictSelection(net.snapshot, net.topology, {first, second, third}, {0});
+    REQUIRE(std::holds_alternative<ConflictChoiceRequest>(next));
+    CHECK(std::get<ConflictChoiceRequest>(next).place == other);
+    CHECK(std::get<ConflictChoiceRequest>(next).activeNormalArcCount == 2);
+    const auto completed = ContinueLegacyConflictSelection(net.snapshot, net.topology, {first, second, third}, {0, 1});
+    REQUIRE(std::holds_alternative<ConflictSelectionPlan>(completed));
+    CHECK(std::get<ConflictSelectionPlan>(completed).selectedInNetOrder == std::vector<TransitionId>{third});
+}
