@@ -51,6 +51,7 @@ void CNetObjectTool::OnLButtonDown( UINT nFlags, const CPoint & point, CDC & dc 
 	CSelectTool& seltool = m_pView->GetSelectTool();
 	CHDrawObjectList& list = seltool.GetSelectedObjects();
 	CPetriSimDoc& doc = m_pView->GetDoc();
+	doc.BeforeNetworkChange();
 
 	if (list.GetCount() == 1)
 	{

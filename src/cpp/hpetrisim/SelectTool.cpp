@@ -71,6 +71,7 @@ void CSelectTool::OnLButtonDown( UINT nFlags, const CPoint & point, CDC & dc)
 		CHDrawObject* pObject = m_listSelected.GetHead();
 		m_Handle = pObject->HitTestHandle(point2);
 
+		doc.BeforeNetworkChange();
 		if (pObject->AddPoint(m_Handle, point2))
 		{
 		}
@@ -90,6 +91,7 @@ void CSelectTool::OnLButtonDown( UINT nFlags, const CPoint & point, CDC & dc)
 
 	if (m_Mode != TrackSelect)
 	{
+		doc.BeforeNetworkChange();
 		CHConnector* pConnector = dynamic_cast<CHConnector*>(m_listSelected.GetHead());
 		int Ret = 0;
 
@@ -640,6 +642,7 @@ void CSelectTool::SelectAll()
 bool CSelectTool::SetSelectedProperty(const CHPropertyValue & val )
 {
 	ASSERT_VALID(m_pView);
+	m_pView->GetDoc().BeforeNetworkChange();
 
 	m_pView->GetPreviewTool().Reset();
 

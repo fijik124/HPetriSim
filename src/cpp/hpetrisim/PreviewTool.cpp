@@ -95,6 +95,7 @@ bool CPreviewTool::RestorePreviewState()
 		return false;
 	}
 
+	m_pView->GetDoc().BeforeNetworkChange();
 	Rect rect;
 
 	INT_PTR loop = 0;
@@ -127,6 +128,7 @@ bool CPreviewTool::SetPreview( CHPropertyValue& val )
 		return false;
 	}
 
+	m_pView->GetDoc().BeforeNetworkChange();
 	CHPropertyValues vals;
 	vals.Add(val);
 	

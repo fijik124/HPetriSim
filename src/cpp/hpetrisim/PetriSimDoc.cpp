@@ -27,6 +27,7 @@
 #include "HpsArchiveHeader.h"
 #include "StoreFillStyleGallery.h"
 #include "PetriSimDoc.h"
+#include <stdexcept>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -71,6 +72,7 @@ CPetriSimDoc::CPetriSimDoc() : m_mapMembers(100)
 
 void CPetriSimDoc::DeleteContents() 
 {
+	BeforeNetworkChange(DocumentSessionChange::Replace);
 	//TODO:
 	//StoreFillStyleGallery();
 
@@ -121,10 +123,48 @@ void CPetriSimDoc::DeleteContents()
 
 CPetriSimDoc::~CPetriSimDoc()
 {
+	if (auto observer = m_SessionLifecycle.lock())
+	{
+		m_SessionLifecycle.reset();
+		observer->DocumentDestroyed();
+	}
+}
+
+bool CPetriSimDoc::AttachSessionLifecycle(const std::shared_ptr<CHDocumentSessionLifecycle>& observer)
+{
+	if (GetCurrentThreadId() != m_SessionOwnerThread)
+		throw std::logic_error("Document lifecycle registration requires the document owner thread");
+	if (!observer) throw std::invalid_argument("Document lifecycle observer is null");
+	if (!m_SessionLifecycle.expired()) return false;
+	m_SessionLifecycle = observer;
+	return true;
+}
+
+void CPetriSimDoc::DetachSessionLifecycle(const CHDocumentSessionLifecycle& observer) noexcept
+{
+	auto registered = m_SessionLifecycle.lock();
+	if (!registered || registered.get() == &observer) m_SessionLifecycle.reset();
+}
+
+void CPetriSimDoc::BeforeNetworkChange(DocumentSessionChange reason)
+{
+	if (auto observer = m_SessionLifecycle.lock())
+	{
+		if (GetCurrentThreadId() != m_SessionOwnerThread)
+			throw std::logic_error("Document mutation requires the document owner thread");
+		observer->BeforeDocumentChange(reason);
+	}
+}
+
+void CPetriSimDoc::SetModifiedFlag(BOOL modified)
+{
+	if (modified) BeforeNetworkChange();
+	CDocument::SetModifiedFlag(modified);
 }
 
 BOOL CPetriSimDoc::OnNewDocument()
 {
+	BeforeNetworkChange(DocumentSessionChange::Replace);
 	if (!__super::OnNewDocument())
 	{
 		return FALSE;
@@ -134,6 +174,7 @@ BOOL CPetriSimDoc::OnNewDocument()
 
 void CPetriSimDoc::OnCloseDocument()
 {
+	BeforeNetworkChange(DocumentSessionChange::Close);
 	return __super::OnCloseDocument();
 }
 
@@ -196,6 +237,7 @@ void CPetriSimDoc::Serialize(CArchive& ar)
 	else
 	{
 			
+		BeforeNetworkChange(DocumentSessionChange::Replace);
 		DWORD count = hps::legacy::ReadDocumentCount(ar);
 
 		if (count == -1)
@@ -309,6 +351,7 @@ void CPetriSimDoc::Dump(CDumpContext& dc) const
 
 BOOL CPetriSimDoc::OnOpenDocument(LPCTSTR lpszPathName) 
 {
+	BeforeNetworkChange(DocumentSessionChange::Replace);
 	if (!CDocument::OnOpenDocument(lpszPathName))
 		return false;
 
@@ -1151,6 +1194,7 @@ void CPetriSimDoc::OnUpdateSimCommand( CCmdUI* pCmdUI )
 
 void CPetriSimDoc::OnSimCommand( UINT nID )
 {
+	BeforeNetworkChange(DocumentSessionChange::LegacySimulation);
 	m_Sim.OnSimCommand(nID);
 }
 
@@ -1178,6 +1222,7 @@ void CPetriSimDoc::AddObjects(const CHDrawObjectList& list, CView* pView/* = 0*/
 	{
 		return;
 	}
+	BeforeNetworkChange();
 
 	POSITION pos = list.GetHeadPosition();
 	while (pos)
@@ -1234,6 +1279,7 @@ void CPetriSimDoc::RemoveObjects( const CHDrawObjectList& list )
 	{
 		return;
 	}
+	BeforeNetworkChange();
 
 	Rect rect;
 

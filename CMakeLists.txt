@@ -48,7 +48,8 @@ set_target_properties(HPetriSim PROPERTIES
 )
 
 # Build alongside the application, but do not make the UI use it yet.
-add_library(hps_legacy_adapter STATIC src/cpp/adapters/LegacyNetAdapter.cpp src/cpp/adapters/LegacySessionAdapter.cpp)
+add_library(hps_legacy_adapter STATIC src/cpp/adapters/LegacyNetAdapter.cpp src/cpp/adapters/LegacySessionAdapter.cpp
+    src/cpp/adapters/LegacyDocumentSessionBinding.cpp)
 target_include_directories(hps_legacy_adapter PUBLIC src/cpp PRIVATE src/cpp/hpetrisim src/cpp/3rd-party)
 target_compile_definitions(hps_legacy_adapter PRIVATE UNICODE _UNICODE WIN32 _WINDOWS)
 target_compile_options(hps_legacy_adapter PRIVATE /W4 /EHsc)
@@ -81,7 +82,8 @@ if(BUILD_TESTING)
     # Link the actual legacy implementations, including their MFC application
     # lifetime objects. The custom console main does not initialize the UI.
     add_executable(hps_simulation_tests ${HPETRISIM_LEGACY_SOURCES}
-        tests/SimulationTestMain.cpp tests/SimulationCharacterization.cpp tests/LegacyNetAdapterTests.cpp)
+        tests/SimulationTestMain.cpp tests/SimulationCharacterization.cpp tests/LegacyNetAdapterTests.cpp
+        tests/LegacyDocumentSessionBindingTests.cpp)
     target_include_directories(hps_simulation_tests PRIVATE src/cpp/hpetrisim src/cpp/3rd-party)
     target_compile_definitions(hps_simulation_tests PRIVATE UNICODE _UNICODE WIN32 _WINDOWS _CONSOLE)
     target_compile_options(hps_simulation_tests PRIVATE /W3 /EHsc /permissive)
@@ -96,6 +98,8 @@ if(BUILD_TESTING)
     add_test(NAME domain.legacy-adapter COMMAND hps_simulation_tests "[adapter]")
     add_test(NAME domain.topology-adapter COMMAND hps_simulation_tests "[adapter-topology]")
     add_test(NAME application.legacy-session COMMAND hps_simulation_tests "[session-adapter]")
+    add_test(NAME application.session-binding COMMAND hps_simulation_tests "[session-binding]")
+    set_tests_properties(application.session-binding PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
     set_tests_properties(application.legacy-session PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     set_tests_properties(domain.topology-adapter PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)

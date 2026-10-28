@@ -33,6 +33,7 @@ void CHArrangeTool::OnArrangeCommand( UINT nID )
 		return;
 	}
 
+	m_pView->GetDoc().BeforeNetworkChange();
 	CHDrawObjectList& sellist = m_pView->GetSelectTool().GetSelectedObjects();
 	CHDrawObjectList& objlist = m_pView->GetDoc().DrawObjectList();
 

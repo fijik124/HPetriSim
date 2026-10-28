@@ -13,6 +13,7 @@
 #include "HSimulation.h"
 #include "HEditorEvent.h"
 #include "OutputWnd.h"
+#include "HDocumentSessionLifecycle.h"
 
 class CPetriSimDoc;
 class CHThread;
@@ -47,6 +48,10 @@ public:
 	virtual void Serialize(CArchive& ar);
 	virtual BOOL OnOpenDocument(LPCTSTR lpszPathName);
 	virtual void DeleteContents();
+	virtual void SetModifiedFlag(BOOL modified = TRUE);
+	bool AttachSessionLifecycle(const std::shared_ptr<CHDocumentSessionLifecycle>& observer);
+	void DetachSessionLifecycle(const CHDocumentSessionLifecycle& observer) noexcept;
+	void BeforeNetworkChange(DocumentSessionChange reason = DocumentSessionChange::Edit);
 	virtual void OnChangedViewList();
 
 private:
@@ -80,6 +85,8 @@ private:
 	CHSimulation m_Sim;
 	CArray<CHEditorEvent*> m_EventReceiver;
 	COutputWndTab* m_pOutputWnd;
+	std::weak_ptr<CHDocumentSessionLifecycle> m_SessionLifecycle;
+	DWORD m_SessionOwnerThread = GetCurrentThreadId();
 
 private:
 	//int m_nAnimCurSteps;

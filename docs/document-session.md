@@ -104,10 +104,10 @@ ctest --test-dir build/vs2022-win32 -C Release -R '^application\.' --output-on-f
 
 ## Next boundary and rollback
 
-Add a controlled binding to document-edit/replacement/close events, enforcing
-invalidation and service closure on the UI owner thread before rendering results.
-Keep it separate from replacing simulation commands or applying markings to
-legacy objects. Test multi-document switching and delayed replies before activation.
+The subsequent [lifecycle binding](document-session-binding.md) adds weak MFC
+registration and conservative pre-edit/load/close invalidation with multi-document
+and delayed-reply tests. It remains opt-in. A presentation bridge, interactive
+coverage, simulation-command replacement and marking write-back follow separately.
 
 Rollback removes `src/cpp/application`, `LegacySessionAdapter.*`, the three legacy
 getters, application/test CMake entries, and new session tests/online assertions.

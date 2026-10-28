@@ -190,6 +190,12 @@ adapter copies exact model and simulation settings; ten portable and five legacy
 cases cover it, including all six sample archives. Document event hooks are not
 activated yet. See [session ownership and invalidation rules](docs/document-session.md).
 
+An opt-in `LegacyDocumentSessionBinding` now closes and invalidates its session
+through document edit/load/close barriers. Weak registration covers either
+destruction order; twelve MFC cases and seven Win32 Release GUI smoke tests verify
+the boundary. Production simulation commands are still unchanged. See
+[binding coverage and remaining edit paths](docs/document-session-binding.md).
+
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all
 six sample files remain unchanged. Save/load round trips, editing, font preview,
