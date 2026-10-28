@@ -122,6 +122,17 @@ the real legacy step, including 201 parameter combinations and a two-step chain.
 Candidates are distinguished from actual conflict winners. See
 [rule semantics, limits and verification](docs/simulation-rules.md).
 
+`PlanLegacyTokenEffects` now plans marking and statistics for explicitly selected
+transitions. Fifteen pure cases and three dedicated differential cases cover it;
+existing step tests also compare its results with the real legacy token-transfer
+code. It is not activated in the UI. See [token effects and safety limits](docs/token-effects.md).
+
+`PlanLegacyTiming` now plans transition delays, logical time, step count and stop
+reasons from explicit stochastic samples. Eighteen pure cases and four dedicated
+differential cases cover it; the fixture also compares timing on every legacy
+step. Random generation and conflict selection remain outside this API. See
+[timing behavior and verification](docs/timing.md).
+
 Use the x64 directory/preset or `-C Debug` for other configurations. UI suites
 must run sequentially and never save reference documents. Tests check that all
 six sample files remain unchanged. Save/load round trips, editing, font preview,

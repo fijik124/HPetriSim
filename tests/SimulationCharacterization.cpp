@@ -3,6 +3,8 @@
 #include "resource.h"
 #include "adapters/LegacyNetAdapter.h"
 #include "domain/SimulationRules.h"
+#include "domain/TokenEffects.h"
+#include "domain/Timing.h"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <memory>
@@ -121,6 +123,8 @@ public:
 		const auto evaluated = EvaluateLegacyEligibility(std::get<NetSnapshot>(exported));
 		REQUIRE(std::holds_alternative<std::vector<TransitionEligibility>>(evaluated));
 		const auto& expected = std::get<std::vector<TransitionEligibility>>(evaluated);
+		const StepClock clockBefore{document.Sim().m_SimTime, document.Sim().m_StepCount,
+			document.Sim().m_SampleTime, document.Sim().m_TimeLimit, document.Sim().m_StepLimit};
 		bool locked = false;
 		REQUIRE(document.Sim().SingleStep(fast, locked));
 		REQUIRE(expected.size() == static_cast<std::size_t>(document.Sim().m_Transitions.GetCount()));
@@ -146,6 +150,51 @@ public:
 				// can be rejected by the real legacy conflict pass afterwards.
 				if (document.Sim().m_ConflictedTransitions.IsEmpty()) CHECK(actual.Activ());
 			}
+		}
+		std::vector<TransitionId> selected;
+		for (INT_PTR index = 0; index < document.Sim().m_Transitions.GetCount(); ++index)
+			if (document.Sim().m_Transitions[index]->Activ())
+				selected.push_back(TransitionId{document.Sim().m_Transitions[index]->Id()});
+		// Selection is supplied by the actual legacy conflict pass; only token
+		// effects are predicted independently from the pre-step snapshot.
+		const auto effect = PlanLegacyTokenEffects(std::get<NetSnapshot>(exported), selected);
+		REQUIRE(std::holds_alternative<TokenEffectPlan>(effect));
+		const auto& plan = std::get<TokenEffectPlan>(effect);
+		for (INT_PTR index = 0; index < document.Sim().m_Positions.GetCount(); ++index)
+		{
+			auto& actual = *document.Sim().m_Positions[index];
+			const auto& predicted = plan.markingAfter.at(PlaceId{actual.Id()});
+			CHECK(predicted.tokens == static_cast<std::uint32_t>(actual.GetToken()));
+			CHECK(predicted.producedTokens == static_cast<std::uint32_t>(actual.GetTokenCount()));
+		}
+		for (INT_PTR index = 0; index < document.Sim().m_Transitions.GetCount(); ++index)
+		{
+			auto& actual = *document.Sim().m_Transitions[index];
+			CHECK(plan.consumedTokensAfter.at(TransitionId{actual.Id()}) == static_cast<std::uint32_t>(actual.GetTokensCount()));
+		}
+		SampledDelays samples;
+		for (INT_PTR index = 0; index < document.Sim().m_Transitions.GetCount(); ++index)
+		{
+			auto& actual = *document.Sim().m_Transitions[index];
+			if (actual.Activ() && (actual.TimeMode() == CHTransition::TTM_EXPONENTIAL || actual.TimeMode() == CHTransition::TTM_EQUAL_DISTR))
+				samples.emplace(TransitionId{actual.Id()}, actual.GetDelay());
+		}
+		// Legacy supplies only selection and stochastic samples at this boundary.
+		// Clock progression, fixed resets and countdown are predicted from before.
+		const auto timing = PlanLegacyTiming(std::get<NetSnapshot>(exported), selected, clockBefore, samples);
+		REQUIRE(std::holds_alternative<TimingPlan>(timing));
+		const auto& timed = std::get<TimingPlan>(timing);
+		CHECK(timed.clockAfter.timeMs == document.Sim().m_SimTime);
+		CHECK(timed.clockAfter.steps == document.Sim().m_StepCount);
+		CHECK(timed.stop.Locked() == locked);
+		CHECK(timed.stop.deadlock == Logged(L"Deadlock"));
+		for (INT_PTR index = 0; index < document.Sim().m_Transitions.GetCount(); ++index)
+		{
+			auto& actual = *document.Sim().m_Transitions[index];
+			const auto& predicted = timed.transitionsAfter.at(TransitionId{actual.Id()});
+			CHECK(predicted.remainingDelayMs == actual.GetDelay());
+			CHECK(predicted.active == actual.Activ());
+			CHECK(predicted.enabled == actual.Enabled());
 		}
 		return locked;
 	}
@@ -749,4 +798,159 @@ TEST_CASE("Chained transitions observe the previous marking until the next step"
 	CHECK_FALSE(first.Activ());
 	CHECK(second.Activ());
 	CHECK(output.GetToken() == 1);
+}
+
+TEST_CASE("Weighted multi-input and multi-output effects match real legacy steps", "[effects-differential]")
+{
+	for (bool fast : {false, true})
+	{
+		CHSimulationCharacterization net;
+		auto& firstInput = net.Place(4);
+		auto& secondInput = net.Place(5);
+		auto& firstOutput = net.Place(1);
+		auto& secondOutput = net.Place(2);
+		firstInput.SetTokenCount(31);
+		firstOutput.SetTokenCount(11);
+		secondOutput.SetTokenCount(21);
+		auto& transition = net.Transition();
+		transition.SetTokensCount(7);
+		net.Arc(firstInput, transition, 2);
+		net.Arc(secondInput, transition, 3);
+		net.Arc(transition, firstOutput, 4);
+		net.Arc(transition, secondOutput);
+		REQUIRE_FALSE(net.Step(fast));
+		CHECK(firstInput.GetToken() == 2);
+		CHECK(secondInput.GetToken() == 2);
+		CHECK(firstInput.GetTokenCount() == 31);
+		CHECK(firstOutput.GetTokenCount() == 15);
+		CHECK(secondOutput.GetTokenCount() == 22);
+		CHECK(transition.GetTokensCount() == 12);
+	}
+}
+
+TEST_CASE("Source and sink effects match a joint legacy step", "[effects-differential]")
+{
+	CHSimulationCharacterization net;
+	auto& input = net.Place(5);
+	auto& output = net.Place(0);
+	auto& source = net.Transition();
+	auto& sink = net.Transition();
+	net.Arc(source, output, 2);
+	net.Arc(input, sink, 3);
+	REQUIRE_FALSE(net.Step());
+	CHECK(input.GetToken() == 2);
+	CHECK(output.GetToken() == 2);
+	CHECK(source.GetTokensCount() == 0);
+	CHECK(sink.GetTokensCount() == 3);
+}
+
+TEST_CASE("Explicit safe batch uses separate input and output phases", "[effects-differential]")
+{
+	CHSimulationCharacterization net;
+	auto& shared = net.Place(4, 6);
+	shared.SetTokenCount(3);
+	auto& first = net.Transition();
+	auto& second = net.Transition();
+	net.Arc(shared, first, 2);
+	net.Arc(first, shared, 2);
+	net.Arc(shared, second, 2);
+	net.Arc(second, shared, 2);
+	// Deliberately bypass Online() conflict preprocessing: this checks only
+	// the real token-transfer code for an explicitly selected, safe batch.
+	REQUIRE_FALSE(net.Step());
+	CHECK(first.Activ());
+	CHECK(second.Activ());
+	CHECK(shared.GetToken() == 4);
+	CHECK(shared.GetTokenCount() == 7);
+	CHECK(first.GetTokensCount() == 2);
+	CHECK(second.GetTokensCount() == 2);
+}
+
+TEST_CASE("Competing fixed timers restart even when one candidate is deselected", "[timing-differential]")
+{
+	CHSimulationCharacterization net;
+	auto& input = net.Place(1);
+	auto& firstOutput = net.Place(0);
+	auto& secondOutput = net.Place(0);
+	auto& first = net.Transition(CHTransition::TTM_DELAY, 2);
+	auto& second = net.Transition(CHTransition::TTM_DELAY, 2);
+	net.Arc(input, first);
+	net.Arc(input, second);
+	net.Arc(first, firstOutput);
+	net.Arc(second, secondOutput);
+	net.Conflict(first);
+	net.Conflict(second);
+	REQUIRE_FALSE(net.Step());
+	REQUIRE_FALSE(net.Step());
+	CHECK(net.Time() == 2);
+	net.Seed(1);
+	REQUIRE_FALSE(net.Step());
+	CHECK(first.Activ());
+	CHECK_FALSE(second.Activ());
+	CHECK(first.GetDelay() == 2);
+	CHECK(second.GetDelay() == 2);
+	CHECK(net.Time() == 2);
+}
+
+TEST_CASE("Read-only firings let a separate timer count down", "[timing-differential]")
+{
+	CHSimulationCharacterization net;
+	auto& input = net.Place(1);
+	auto& output = net.Place(0);
+	auto& read = net.Transition();
+	auto& waiting = net.Transition(CHTransition::TTM_DELAY, 3);
+	net.Arc(input, read, 1, CHConnector::TypeTest);
+	net.Arc(read, output, 1, CHConnector::TypeTest);
+	REQUIRE_FALSE(net.Step());
+	CHECK(read.Activ());
+	CHECK(waiting.GetDelay() == 2);
+	CHECK(net.Time() == 1);
+	CHECK(input.GetToken() == 1);
+	CHECK(output.GetToken() == 0);
+}
+
+TEST_CASE("Explicit stochastic replay predicts timing before the legacy step", "[timing-differential]")
+{
+	using namespace hps::domain;
+	for (auto mode : {CHTransition::TTM_EQUAL_DISTR, CHTransition::TTM_EXPONENTIAL})
+	{
+		CHSimulationCharacterization net;
+		auto& input = net.Place(4);
+		auto& output = net.Place(0);
+		auto& transition = net.Transition(mode, mode == CHTransition::TTM_EQUAL_DISTR ? 2 : 10, 7);
+		net.Arc(input, transition);
+		net.Arc(transition, output);
+		net.Seed(1);
+		const std::vector<long> expected = mode == CHTransition::TTM_EQUAL_DISTR
+			? std::vector<long>{2, 4, 2, 6} : std::vector<long>{5, 10, 7, 13};
+		for (const auto sample : expected)
+		{
+			transition.SetDelay(0);
+			const auto exported = hps::adapters::ExportLegacyNet(net.document);
+			REQUIRE(std::holds_alternative<NetSnapshot>(exported));
+			const TransitionId id{transition.Id()};
+			const auto prediction = PlanLegacyTiming(std::get<NetSnapshot>(exported), {id},
+				StepClock{net.Time(), net.Steps(), 1, 1000, 1000}, {{id, sample}});
+			REQUIRE(std::holds_alternative<TimingPlan>(prediction));
+			REQUIRE_FALSE(net.Step());
+			const auto& plan = std::get<TimingPlan>(prediction);
+			CHECK(plan.transitionsAfter.at(id).remainingDelayMs == transition.GetDelay());
+			CHECK(transition.GetDelay() == sample);
+			CHECK(plan.clockAfter.timeMs == net.Time());
+			CHECK(plan.clockAfter.steps == net.Steps());
+		}
+	}
+}
+
+TEST_CASE("Legacy normal output retains simultaneous stop reasons", "[timing-differential]")
+{
+	CHSimulationCharacterization net;
+	net.document.Sim().SimTime(2);
+	net.Limits(1, 0);
+	CHECK(net.Step(false));
+	CHECK(net.Logged(L"Time limit"));
+	CHECK(net.Logged(L"Step limit"));
+	CHECK(net.Logged(L"Deadlock"));
+	CHECK(net.Time() == 2);
+	CHECK(net.Steps() == 1);
 }

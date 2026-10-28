@@ -81,7 +81,8 @@ enum class ValidationCode
     InvalidWeight, InvalidTiming, InvalidEnum, MissingEndpoint,
     NonBipartiteArc, MissingState, UnexpectedState,
     InvalidObject, DisconnectedArc, ForeignEndpoint, StaleReference, SnapshotUnavailable,
-    UnsupportedLegacyRange
+    UnsupportedLegacyRange, InvalidSelection, TokenUnderflow, ArithmeticOverflow,
+    InvalidSimulationSettings, InvalidDelaySample
 };
 struct ValidationIssue
 {

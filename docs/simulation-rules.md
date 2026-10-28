@@ -116,7 +116,8 @@ Remove `SimulationRules.*`, its domain source entry, the range diagnostic code,
 the new test file/CTest entries and the test-fixture comparisons/differential
 cases. No persistence migration or reverse adapter is required.
 
-The next small extraction is token-effect planning for explicitly selected
-transitions. Conflict selection, random sampling, time advancement and safe
+The subsequent [token-effect extraction](token-effects.md) plans marking and
+statistics for explicitly selected transitions and compares them with legacy
+results. Conflict selection, random sampling, time advancement and safe
 background execution should remain separate, testable steps before activating
 the new implementation in the UI.

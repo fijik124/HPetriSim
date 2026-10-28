@@ -116,5 +116,9 @@ including `resource.h`; no production API change was needed for those errors.
 
 The subsequent [eligibility extraction](simulation-rules.md) compares pure
 pre-conflict decisions with each legacy step in this fixture. Its results remain
-independent of MFC drawing state and notification delivery; later firing phases
+independent of MFC drawing state and notification delivery. The subsequent
+[token-effect extraction](token-effects.md) compares marking and statistics after
+each step using the selection supplied by the legacy kernel. The subsequent
+[timing extraction](timing.md) compares delays, logical time, step counts and stop
+reasons using explicit stochastic samples. Conflict policy and background lifetime
 still need extraction and verification.
