@@ -24,6 +24,7 @@
 #include "HTransition.h"
 #include "HLabel.h"
 #include "ArchiveHelper.h"
+#include "HpsArchiveHeader.h"
 #include "StoreFillStyleGallery.h"
 #include "PetriSimDoc.h"
 
@@ -175,8 +176,7 @@ void CPetriSimDoc::Serialize(CArchive& ar)
 	
 	if (ar.IsStoring())
 	{
-		ar.WriteCount(-1); //detect newer version
-		ar.WriteCount(2); //actual document version
+		hps::legacy::WriteDocumentHeader(ar);
 
 		m_listObjects.Serialize(ar);
 
@@ -196,13 +196,17 @@ void CPetriSimDoc::Serialize(CArchive& ar)
 	else
 	{
 			
-		DWORD count = ar.ReadCount();
+		DWORD count = hps::legacy::ReadDocumentCount(ar);
 
 		if (count == -1)
 		{
 			m_ConvertVersion = false;
 
-			DWORD version = ar.ReadCount();
+			const WORD version = hps::legacy::ReadDocumentVersion(ar);
+			if (version != 2)
+			{
+				AfxThrowArchiveException(CArchiveException::badSchema);
+			}
 
 			if (version == 2)
 			{

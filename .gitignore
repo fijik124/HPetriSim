@@ -261,5 +261,7 @@ __pycache__/
 *.pyc
 
 # project defined 
+build/
+CMakeUserPresets.json
 web/
 setup/

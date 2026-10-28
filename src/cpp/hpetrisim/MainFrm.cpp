@@ -20,12 +20,59 @@
 #include "HNetMember.h"
 #include "RibbonEdit.h"
 #include "MainFrm.h"
+#include <algorithm>
+#include <memory>
+#include <vector>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #undef THIS_FILE
 static CHAR THIS_FILE[] = __FILE__;
 #endif
+
+namespace
+{
+void PopulateScreenFonts(CMFCRibbonComboBox& combo)
+{
+	// Document text uses installed GDI+ fonts. MFC's font combo also queries
+	// printer drivers synchronously, which can block main-window creation.
+	Gdiplus::InstalledFontCollection collection;
+	if (collection.GetLastStatus() != Gdiplus::Ok)
+	{
+		AfxMessageBox(L"Cannot enumerate installed fonts.", MB_ICONERROR);
+		AfxThrowUserException();
+	}
+	const int count = collection.GetFamilyCount();
+	if (count <= 0)
+	{
+		AfxMessageBox(L"No installed font families are available.", MB_ICONERROR);
+		AfxThrowUserException();
+	}
+	std::vector<Gdiplus::FontFamily> families(count);
+	int found = 0;
+	if (collection.GetFamilies(count, families.data(), &found) != Gdiplus::Ok)
+	{
+		AfxMessageBox(L"Cannot read installed font families.", MB_ICONERROR);
+		AfxThrowUserException();
+	}
+	std::vector<CString> names;
+	for (int index = 0; index < found; ++index)
+	{
+		WCHAR name[LF_FACESIZE] = {};
+		if (families[index].GetFamilyName(name) != Gdiplus::Ok)
+		{
+			AfxMessageBox(L"Cannot read an installed font family name.", MB_ICONERROR);
+			AfxThrowUserException();
+		}
+		names.emplace_back(name);
+	}
+	std::sort(names.begin(), names.end());
+	for (const CString& name : names)
+	{
+		combo.AddItem(name);
+	}
+}
+}
 
 /*************************************************************************/
 // CMainFrame
@@ -485,9 +532,10 @@ void CMainFrame::InitializeShapeFormatContextRibbon()
 	pPanel = pCategory->AddPanel(L"Fonts\nf");
 
 	CMFCRibbonButtonsGroup* pGroup = new CMFCRibbonButtonsGroup();
-	CMFCRibbonFontComboBox* pFontsCombo = new CMFCRibbonFontComboBox(ID_OBJECT_FONT_NAME);
+	std::unique_ptr<CMFCRibbonComboBox> pFontsCombo(new CMFCRibbonComboBox(ID_OBJECT_FONT_NAME, TRUE));
+	PopulateScreenFonts(*pFontsCombo);
 	pFontsCombo->SelectItem(_T("Arial"));
-	pGroup->AddButton(pFontsCombo);
+	pGroup->AddButton(pFontsCombo.release()); // The ribbon group owns its elements.
 
 	CMFCRibbonComboBox* pComboButton = new CMFCRibbonComboBox(ID_OBJECT_FONT_SIZE, TRUE, 40);
 	pComboButton->AddItem(L"8");
@@ -737,8 +785,8 @@ bool CMainFrame::SetValuesToRibbon(const CHPropertyValues& vals)
 				return true;
 			}
 	
-			CMFCRibbonFontComboBox* pFontCombo = DYNAMIC_DOWNCAST(CMFCRibbonFontComboBox, pelement);
-			if (pFontCombo)
+			CMFCRibbonComboBox* pFontCombo = DYNAMIC_DOWNCAST(CMFCRibbonComboBox, pelement);
+			if (pFontCombo && val.Id == ID_OBJECT_FONT_NAME)
 			{
 				if(pFontCombo->SelectItem(val.GetString()) == FALSE)
 				{
@@ -831,8 +879,8 @@ bool  CMainFrame::GetValueFromRibbon(CHPropertyValue& val)
 		return true;
 	}
 
-	CMFCRibbonFontComboBox* pFontCombo = DYNAMIC_DOWNCAST(CMFCRibbonFontComboBox, buttons[0]);
-	if(pFontCombo)
+	CMFCRibbonComboBox* pFontCombo = DYNAMIC_DOWNCAST(CMFCRibbonComboBox, buttons[0]);
+	if(pFontCombo && val.Id == ID_OBJECT_FONT_NAME)
 	{
 		val = pFontCombo->GetEditText();
 		return true;

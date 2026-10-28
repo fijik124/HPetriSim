@@ -63,6 +63,8 @@ public:
 	UINT Run();
 
 private:
+	// Synchronous characterization of the legacy step; no public simulation API.
+	friend class CHSimulationCharacterization;
 	void SendMessage(UpdateMode mode);
 	bool SingleStep(bool fast, bool& lock);
 	void AnimateTokens();

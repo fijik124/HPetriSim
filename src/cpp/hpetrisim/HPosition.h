@@ -43,6 +43,7 @@ public:
 
 	virtual bool IsPMember(){return true;};
 	long GetToken(){return m_Tokens;};
+	ULONG32 InitialTokens() const { return m_TokensStart; }
 	void SetToken(long tokens){m_Tokens = tokens;};
 	long GetTokenCount(){return m_TokensCount;};
 	void SetTokenCount(long tokens){m_TokensCount = tokens;};
